@@ -98,8 +98,8 @@ def process_knowledge_base(cfg, cli_args):
             for note in notes:
                 try:
                     logger.info(f"Analyzing links for: {note['path']}")
-                    # Pass auto_index=False to prevent automatic indexing during analysis
-                    analysis = link_service.analyze_relationships(note["path"], auto_index=False)
+                    # Enable auto_index=True to ensure notes are indexed if not found
+                    analysis = link_service.analyze_relationships(note["path"], auto_index=True)
                     _display_link_analysis(note["path"], analysis, cfg)
 
                     # Update links based on suggestions
@@ -262,6 +262,28 @@ def process_knowledge_base(cfg, cli_args):
                 _display_note_structure(chunks, cfg)
             except FileNotFoundError:
                 logger.error(f"Note not found: {note_path}")
+                
+        elif cli_args.debug_store:
+            # Debug the vector store contents
+            logger.info("Debugging vector store contents...")
+            debug_info = vector_store.debug_store_contents()
+            
+            print("\nVector Store Debug Information:")
+            for collection_name, info in debug_info.items():
+                print(f"\nCollection: {collection_name}")
+                if "error" in info:
+                    print(f"  Error: {info['error']}")
+                    continue
+                    
+                print(f"  Document count: {info['count']}")
+                print("  Document types:")
+                for doc_type, count in info.get("doc_types", {}).items():
+                    print(f"    - {doc_type}: {count}")
+                
+                if info.get("sample_ids"):
+                    print("  Sample IDs:")
+                    for sample_id in info["sample_ids"]:
+                        print(f"    - {sample_id}")
 
     except Exception as e:
         logger.error(f"Error processing knowledge base: {str(e)}")

@@ -132,5 +132,10 @@ def setup_argparser() -> argparse.ArgumentParser:
         action="store_true",
         help="Output note connections in Mermaid graph format",
     )
+    kb_parser.add_argument(
+        "--debug-store",
+        action="store_true",
+        help="Display debug information about the vector store contents",
+    )
 
     return parser

@@ -634,19 +634,38 @@ class LinkService:
 
         # Normalize the path
         path = os.path.normpath(path)
+        
+        # Log the path we're trying to convert
+        logger.debug(f"Converting path to relative ID: {path}")
+        logger.debug(f"Base path: {self.base_path}")
 
         # Try to make it relative to the base path
         try:
             if path.startswith(self.base_path):
-                return os.path.relpath(path, self.base_path)
+                relative_path = os.path.relpath(path, self.base_path)
+                logger.debug(f"Path is relative to base_path: {relative_path}")
+                return relative_path
 
             # If it's not under base_path, check if it contains the base directory name
-            if f"/{self.base_dir_name}/" in path:
-                parts = path.split(f"/{self.base_dir_name}/")
+            base_dir_pattern = f"/{self.base_dir_name}/"
+            if base_dir_pattern in path:
+                parts = path.split(base_dir_pattern)
                 if len(parts) > 1:
-                    return parts[1]
+                    relative_path = parts[1]
+                    logger.debug(f"Path extracted after base dir: {relative_path}")
+                    return relative_path
+                
+            # Try another approach - find the common part with base_path
+            common_prefix = os.path.commonpath([path, self.base_path])
+            if common_prefix and common_prefix != "/":
+                relative_path = path[len(common_prefix):].lstrip('/')
+                logger.debug(f"Path relative to common prefix: {relative_path}")
+                return relative_path
+                
         except Exception as e:
             logger.warning(f"Error converting path to relative ID: {str(e)}")
 
         # If all else fails, just return the basename
-        return os.path.basename(path)
+        basename = os.path.basename(path)
+        logger.debug(f"Using basename as fallback: {basename}")
+        return basename

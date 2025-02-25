@@ -512,35 +512,87 @@ class VectorStoreService:
         """
         try:
             logger.info(f"Retrieving content for note: {doc_id}")
-            # First try exact match on doc_id
-            results = self.collections["notes"].query(
-                query_embeddings=[[1.0] * self.embedding_dims],  # Dummy embedding for exact match
-                where={"doc_id": doc_id},
-                include=["documents", "metadatas", "embeddings"],
-            )
-
-            if not results["ids"][0]:
-                logger.warning(f"No content found for note: {doc_id}")
+            
+            # Try multiple variations of the doc_id to increase chances of finding the document
+            possible_ids = [
+                doc_id,  # Original ID
+                os.path.basename(doc_id),  # Just the filename
+                doc_id.replace('\\', '/'),  # Normalize path separators
+                os.path.normpath(doc_id)  # Normalize path
+            ]
+            
+            # Remove duplicates
+            possible_ids = list(set(possible_ids))
+            logger.debug(f"Trying possible IDs: {possible_ids}")
+            
+            # Try each possible ID
+            for try_id in possible_ids:
+                # First try exact match on doc_id
+                results = self.collections["notes"].query(
+                    query_embeddings=[[1.0] * self.embedding_dims],  # Dummy embedding for exact match
+                    where={"doc_id": try_id},
+                    include=["documents", "metadatas", "embeddings"],
+                )
+                
+                if results["ids"][0]:
+                    logger.info(f"Found content for note using ID: {try_id}")
+                    return {
+                        "content": results["documents"][0][0],
+                        "metadata": results["metadatas"][0][0],
+                        "embedding": results["embeddings"][0][0],
+                    }
+                
                 # Try searching by chunk IDs
                 chunk_results = self.collections["notes"].get(
-                    ids=[f"{doc_id}_chunk_0"],
+                    ids=[f"{try_id}_chunk_0"],
                     include=["documents", "metadatas", "embeddings"],
                 )
                 if chunk_results["ids"]:
-                    logger.info(f"Found content via chunk ID for note: {doc_id}")
+                    logger.info(f"Found content via chunk ID for note: {try_id}")
                     return {
                         "content": chunk_results["documents"][0],
                         "metadata": chunk_results["metadatas"][0],
                         "embedding": chunk_results["embeddings"][0],
                     }
-                logger.error(f"Note not found in vector store: {doc_id}")
-                return None
-
-            return {
-                "content": results["documents"][0][0],
-                "metadata": results["metadatas"][0][0],
-                "embedding": results["embeddings"][0][0],
-            }
+            
+            # If we get here, we've tried all variations and found nothing
+            logger.warning(f"No content found for note with any ID variation: {doc_id}")
+            
+            # Last resort: try a fuzzy search across all documents
+            try:
+                # Get all document IDs
+                all_docs = self.collections["notes"].get(
+                    where={},
+                    include=["metadatas"]
+                )
+                
+                if all_docs["ids"]:
+                    logger.debug(f"Found {len(all_docs['ids'])} total documents in store")
+                    
+                    # Look for partial matches in doc_id
+                    basename = os.path.basename(doc_id)
+                    for i, metadata in enumerate(all_docs["metadatas"]):
+                        stored_id = metadata.get("doc_id", "")
+                        if basename in stored_id or stored_id in doc_id:
+                            logger.info(f"Found fuzzy match: {stored_id} for requested {doc_id}")
+                            
+                            # Get the full document
+                            fuzzy_result = self.collections["notes"].get(
+                                ids=[all_docs["ids"][i]],
+                                include=["documents", "metadatas", "embeddings"],
+                            )
+                            
+                            if fuzzy_result["ids"]:
+                                return {
+                                    "content": fuzzy_result["documents"][0],
+                                    "metadata": fuzzy_result["metadatas"][0],
+                                    "embedding": fuzzy_result["embeddings"][0],
+                                }
+            except Exception as fuzzy_error:
+                logger.warning(f"Error during fuzzy search: {str(fuzzy_error)}")
+            
+            logger.error(f"Note not found in vector store: {doc_id}")
+            return None
         except Exception as e:
             logger.error(f"Error retrieving note content: {str(e)}")
             return None
@@ -715,3 +767,38 @@ class VectorStoreService:
         sample_text = "Sample text to determine embedding dimensions"
         sample_embedding = self.embedding_service.embed_text(sample_text)
         return len(sample_embedding)
+        
+    def debug_store_contents(self) -> Dict[str, Any]:
+        """
+        Get debug information about the vector store contents.
+        
+        Returns:
+            Dictionary with debug information about collections
+        """
+        debug_info = {}
+        
+        try:
+            for name, collection in self.collections.items():
+                try:
+                    # Get all IDs in the collection
+                    results = collection.get(include=["metadatas"])
+                    
+                    # Count documents by type
+                    doc_types = {}
+                    for metadata in results["metadatas"]:
+                        doc_type = metadata.get("doc_type", "unknown")
+                        if doc_type not in doc_types:
+                            doc_types[doc_type] = 0
+                        doc_types[doc_type] += 1
+                    
+                    debug_info[name] = {
+                        "count": len(results["ids"]),
+                        "doc_types": doc_types,
+                        "sample_ids": results["ids"][:5] if results["ids"] else []
+                    }
+                except Exception as e:
+                    debug_info[name] = {"error": str(e)}
+            
+            return debug_info
+        except Exception as e:
+            return {"error": str(e)}
