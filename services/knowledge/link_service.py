@@ -337,9 +337,11 @@ class LinkService:
                         "chunk_count": 1
                     }
                 else:
+                    # Update existing match with new chunk information
                     match = note_matches[result_id]
                     match["chunk_similarities"].append(result["similarity"])
                     match["chunk_count"] += 1
+                    # Update max similarity and preview if this chunk has higher similarity
                     if result["similarity"] > match["max_similarity"]:
                         match["max_similarity"] = result["similarity"]
                         match["best_preview"] = result["content"][:200].replace("\n", " ").strip()
