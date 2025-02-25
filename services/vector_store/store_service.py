@@ -6,16 +6,16 @@ import os
 import time
 import numpy as np
 from sqlite3 import OperationalError
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import chromadb
 from chromadb.config import Settings
 
 logger = logging.getLogger(__name__)
 
+# Constants for retry logic
 MAX_RETRIES = 3
-RETRY_DELAY = 1  # seconds
-
+RETRY_DELAY = 1.0
 
 class VectorStoreService:
     """Manages document storage and retrieval using ChromaDB."""
@@ -23,14 +23,7 @@ class VectorStoreService:
     def __init__(
         self, config: Dict[str, Any], chunking_service=None, embedding_service=None
     ):
-        """
-        Initialize the vector store service.
-
-        Args:
-            config: Configuration dictionary containing vector store settings
-            chunking_service: Optional ChunkingService instance
-            embedding_service: Optional EmbeddingService instance
-        """
+        """Initialize the vector store service."""
         self.config = config.get("vector_store", {})
         self.chunking_service = chunking_service
         self.embedding_service = embedding_service
@@ -43,8 +36,11 @@ class VectorStoreService:
         self.embedding_dims = self._get_embedding_dimensions()
         logger.info(f"Using embedding dimensions: {self.embedding_dims}")
 
-        # Get HNSW settings from config
-        hnsw_config = self.config.get("hnsw_config", {})
+        # Get HNSW and batch settings from config
+        self.hnsw_config = self.config.get("hnsw_config", {})
+        self.batch_upsert_size = self.config.get("batch_upsert_size", 20)
+        self.max_retries = self.config.get("max_retries", 3)
+        self.retry_delay = self.config.get("retry_delay", 1)
 
         # Initialize ChromaDB with settings
         self.client = chromadb.PersistentClient(
@@ -58,65 +54,148 @@ class VectorStoreService:
 
         # Configure collection settings with HNSW parameters
         collection_params = {
-            "hnsw:space": "cosine",  # Use cosine distance
-            "hnsw:construction_ef": hnsw_config.get("ef_construction", 400),
-            "hnsw:search_ef": hnsw_config.get("ef_search", 200),
-            "hnsw:M": hnsw_config.get("m", 128),
+            "hnsw:space": "cosine",
+            "hnsw:construction_ef": self.hnsw_config.get("ef_construction", 400),
+            "hnsw:search_ef": self.hnsw_config.get("ef_search", 200),
+            "hnsw:M": self.hnsw_config.get("m", 128),
         }
 
-        # Initialize system metadata collection
-        self.system_collection = self.client.get_or_create_collection(
-            name="system",
-            metadata={
-                "description": "System-level metadata and tracking",
-                **collection_params
-            },
-        )
+        # Initialize collections with retry logic
+        self._init_collections(collection_params)
 
-        # Create metadata collection for tracking document updates
-        self.metadata_collection = self.client.get_or_create_collection(
-            name="metadata",
-            metadata={
-                "description": "Document metadata and update tracking",
-                **collection_params
-            },
-        )
+    def _init_collections(self, collection_params: Dict[str, Any]) -> None:
+        """Initialize collections with retry logic."""
+        collections_to_create = {
+            "system": "System-level metadata and tracking",
+            "metadata": "Document metadata and update tracking",
+            "notes": "General notes and their chunks",
+            "links": "Link relationships between notes",
+            "references": "External references and citations",
+        }
 
-        # Create collections for different types of content
-        try:
-            self.collections = {
-                "notes": self.client.get_or_create_collection(
-                    name="notes",
-                    metadata={
-                        "description": "General notes and their chunks",
-                        **collection_params
-                    },
-                ),
-                "links": self.client.get_or_create_collection(
-                    name="links",
-                    metadata={
-                        "description": "Link relationships between notes",
-                        **collection_params
-                    },
-                ),
-                "references": self.client.get_or_create_collection(
-                    name="references",
-                    metadata={
-                        "description": "External references and citations",
-                        **collection_params
-                    },
-                ),
+        self.collections = {}
+        for name, description in collections_to_create.items():
+            for attempt in range(self.max_retries):
+                try:
+                    self.collections[name] = self.client.get_or_create_collection(
+                        name=name,
+                        metadata={
+                            "description": description,
+                            **collection_params
+                        },
+                    )
+                    break
+                except Exception as e:
+                    if attempt == self.max_retries - 1:
+                        logger.error(f"Failed to initialize collection {name}: {str(e)}")
+                        raise
+                    time.sleep(self.retry_delay)
+
+        logger.info("Vector store collections initialized successfully")
+
+    def _batch_upsert(self, collection, ids, embeddings, documents, metadatas):
+        """Upsert data in batches with retry logic."""
+        for i in range(0, len(ids), self.batch_upsert_size):
+            batch_ids = ids[i:i + self.batch_upsert_size]
+            batch_embeddings = embeddings[i:i + self.batch_upsert_size]
+            batch_documents = documents[i:i + self.batch_upsert_size]
+            batch_metadatas = metadatas[i:i + self.batch_upsert_size]
+
+            for attempt in range(self.max_retries):
+                try:
+                    collection.upsert(
+                        ids=batch_ids,
+                        embeddings=batch_embeddings,
+                        documents=batch_documents,
+                        metadatas=batch_metadatas,
+                    )
+                    logger.info(f"Upserted batch of {len(batch_ids)} items")
+                    break
+                except Exception as e:
+                    if attempt == self.max_retries - 1:
+                        logger.error(f"Failed to upsert batch after {self.max_retries} attempts: {str(e)}")
+                        raise
+                    logger.warning(f"Upsert attempt {attempt + 1} failed, retrying in {self.retry_delay}s")
+                    time.sleep(self.retry_delay)
+
+    def add_document(
+        self,
+        doc_id: str,
+        chunks: List[str],
+        embeddings: List[List[float]],
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Add a document's chunks and their embeddings to the store."""
+        metadata = metadata or {}
+        chunk_ids = []
+        chunk_metadata = []
+
+        # Process chunks in batches
+        max_chunks = self.config.get("chunking_config", {}).get("recursive", {}).get("max_chunks_per_doc", 50)
+        if len(chunks) > max_chunks:
+            logger.warning(f"Document {doc_id} has {len(chunks)} chunks, truncating to {max_chunks}")
+            chunks = chunks[:max_chunks]
+            embeddings = embeddings[:max_chunks]
+
+        for i, chunk in enumerate(chunks):
+            chunk_id = f"{doc_id}_chunk_{i}"
+            chunk_meta = {
+                "doc_id": doc_id,
+                "chunk_index": i,
+                "doc_type": metadata.get("type", "note"),
+                "source_path": metadata.get("source", ""),
+                "date": metadata.get("date", "") or "",
+                "filename": metadata.get("filename", "") or "",
             }
-            logger.info("Vector store collections initialized successfully")
-        except Exception as e:
-            logger.error(f"Error initializing vector store collections: {str(e)}")
-            raise
+
+            # Extract and add links if present
+            wiki_links = self._extract_wiki_links(chunk)
+            if wiki_links:
+                chunk_meta["wiki_links"] = json.dumps(wiki_links)
+
+            external_refs = self._extract_external_refs(chunk)
+            if external_refs:
+                chunk_meta["external_refs"] = json.dumps(external_refs)
+
+            chunk_ids.append(chunk_id)
+            chunk_metadata.append(chunk_meta)
+
+        if chunk_ids:
+            try:
+                self._batch_upsert(
+                    self.collections["notes"],
+                    chunk_ids,
+                    embeddings,
+                    chunks,
+                    chunk_metadata,
+                )
+                logger.info(f"Added document {doc_id} with {len(chunks)} chunks")
+            except Exception as e:
+                logger.error(f"Error adding document {doc_id}: {str(e)}")
+                raise
+
+        # Store link relationships
+        self._store_link_relationships(doc_id, chunks, metadata)
+
+        # Update document metadata
+        if metadata and "modified_time" in metadata:
+            try:
+                self._batch_upsert(
+                    self.collections["metadata"],
+                    [doc_id],
+                    [[1.0] * self.embedding_dims],
+                    [""],
+                    [{"modified_time": metadata["modified_time"]}],
+                )
+            except Exception as e:
+                logger.error(f"Error updating metadata for {doc_id}: {str(e)}")
+                raise
 
     def clear_all_collections(self) -> None:
         """Clear all data from all collections by deleting and recreating them."""
         try:
             logger.info("Clearing all collections...")
-            
+
             # Delete and recreate each collection
             for name, old_collection in self.collections.items():
                 collection_metadata = old_collection.metadata
@@ -126,51 +205,85 @@ class VectorStoreService:
                     metadata=collection_metadata
                 )
                 logger.info(f"Cleared collection: {name}")
-            
-            # Handle system and metadata collections
-            self.client.delete_collection("system")
-            self.client.delete_collection("metadata")
-            
-            # Recreate system and metadata collections with original settings
-            self.system_collection = self.client.create_collection(
-                name="system",
-                metadata={"description": "System-level metadata and tracking"}
-            )
-            self.metadata_collection = self.client.create_collection(
-                name="metadata",
-                metadata={"description": "Document metadata and update tracking"}
-            )
-            
+
             logger.info("Successfully cleared and recreated all collections")
         except Exception as e:
             logger.error(f"Error clearing collections: {str(e)}")
             raise
 
     def get_last_update_time(self) -> float:
-        """Get the timestamp of the last update operation."""
+        """
+        Get the timestamp of the last update operation.
+
+        Returns:
+            float: Unix timestamp of the last update, or 0 if not set
+        """
         try:
-            results = self.system_collection.get(
-                ids=["last_update"], include=["metadatas"]
-            )
-            if results["ids"]:
-                return float(results["metadatas"][0].get("timestamp", 0))
+            retries = 0
+            while retries < MAX_RETRIES:
+                try:
+                    metadata_path = os.path.join(self.db_path, "metadata.json")
+
+                    # Read existing metadata if it exists
+                    if os.path.exists(metadata_path):
+                        with open(metadata_path, "r") as f:
+                            metadata = json.load(f)
+                            return float(metadata.get("last_update", 0))
+                    else:
+                        return 0
+                except Exception as e:
+                    retries += 1
+                    logger.warning(f"Error getting last update time (attempt {retries}/{MAX_RETRIES}): {str(e)}")
+                    if retries < MAX_RETRIES:
+                        time.sleep(RETRY_DELAY)
+                    else:
+                        raise
+
             return 0
         except Exception as e:
             logger.error(f"Error getting last update time: {str(e)}")
             return 0
 
     def set_last_update_time(self, timestamp: float) -> None:
-        """Set the timestamp of the last update operation."""
+        """
+        Set the last update time for the vector store.
+
+        Args:
+            timestamp: Unix timestamp to set as last update time
+        """
         try:
-            self._retry_operation(
-                self.system_collection.upsert,
-                ids=["last_update"],
-                metadatas=[{"timestamp": str(timestamp)}],
-                embeddings=[[1.0] * self.embedding_dims],
-                documents=[""],
-            )
+            retries = 0
+            while retries < MAX_RETRIES:
+                try:
+                    metadata_path = os.path.join(self.db_path, "metadata.json")
+
+                    # Read existing metadata if it exists
+                    if os.path.exists(metadata_path):
+                        with open(metadata_path, "r") as f:
+                            metadata = json.load(f)
+                    else:
+                        metadata = {}
+
+                    # Update the last_update field
+                    metadata["last_update"] = timestamp
+
+                    # Write back to file
+                    with open(metadata_path, "w") as f:
+                        json.dump(metadata, f)
+
+                    logger.info(f"Set last update time to {timestamp}")
+                    return
+                except Exception as e:
+                    retries += 1
+                    logger.warning(f"Error setting last update time (attempt {retries}/{MAX_RETRIES}): {str(e)}")
+                    if retries < MAX_RETRIES:
+                        time.sleep(RETRY_DELAY)
+                    else:
+                        raise
+
         except Exception as e:
             logger.error(f"Error setting last update time: {str(e)}")
+            raise
 
     def needs_update(self, doc_id: str, modified_time: float) -> bool:
         """
@@ -185,7 +298,7 @@ class VectorStoreService:
         """
         try:
             # Check if document exists in metadata collection
-            results = self.metadata_collection.get(ids=[doc_id], include=["metadatas"])
+            results = self.collections["metadata"].get(ids=[doc_id], include=["metadatas"])
 
             if not results["ids"]:
                 return True  # Document not in store, needs to be added
@@ -199,104 +312,23 @@ class VectorStoreService:
     def _retry_operation(self, operation, *args, **kwargs):
         """Execute an operation with retries."""
         last_error = None
-        for attempt in range(MAX_RETRIES):
+        for attempt in range(self.max_retries):
             try:
                 return operation(*args, **kwargs)
             except OperationalError as e:
                 last_error = e
                 logger.warning(
-                    f"Database operation failed (attempt {attempt + 1}/{MAX_RETRIES}): {str(e)}"
+                    f"Database operation failed (attempt {attempt + 1}/{self.max_retries}): {str(e)}"
                 )
-                if attempt < MAX_RETRIES - 1:
-                    time.sleep(RETRY_DELAY * (attempt + 1))
+                if attempt < self.max_retries - 1:
+                    time.sleep(self.retry_delay * (attempt + 1))
                 continue
             except Exception as e:
                 logger.error(f"Unexpected error during database operation: {str(e)}")
                 raise
 
-        logger.error(f"Operation failed after {MAX_RETRIES} attempts")
+        logger.error(f"Operation failed after {self.max_retries} attempts")
         raise last_error
-
-    def add_document(
-        self,
-        doc_id: str,
-        chunks: List[str],
-        embeddings: List[List[float]],
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> None:
-        """
-        Add a document's chunks and their embeddings to the store.
-
-        Args:
-            doc_id: Unique identifier for the document
-            chunks: List of text chunks from the document
-            embeddings: List of embedding vectors corresponding to chunks
-            metadata: Optional metadata about the document
-        """
-        # Ensure metadata exists
-        metadata = metadata or {}
-
-        # Create chunk IDs and metadata
-        chunk_ids = []
-        chunk_metadata = []
-
-        for i, chunk in enumerate(chunks):
-            chunk_id = f"{doc_id}_chunk_{i}"
-            # Ensure all metadata values are valid types
-            chunk_meta = {
-                "doc_id": doc_id,
-                "chunk_index": i,
-                "doc_type": metadata.get("type", "note"),
-                "source_path": metadata.get("source", ""),
-                "date": metadata.get("date", "") or "",
-                "filename": metadata.get("filename", "") or "",
-            }
-
-            # Extract links if present in the chunk
-            wiki_links = self._extract_wiki_links(chunk)
-            if wiki_links:
-                chunk_meta["wiki_links"] = json.dumps(wiki_links)
-
-            # Extract external references if present
-            external_refs = self._extract_external_refs(chunk)
-            if external_refs:
-                chunk_meta["external_refs"] = json.dumps(external_refs)
-
-            chunk_ids.append(chunk_id)
-            chunk_metadata.append(chunk_meta)
-
-        # Only add if we have chunks
-        if chunk_ids:
-            # Upsert chunks to main notes collection
-            self._retry_operation(
-                self.collections["notes"].upsert,
-                ids=chunk_ids,
-                embeddings=embeddings,
-                documents=chunks,
-                metadatas=chunk_metadata,
-            )
-            logger.info(f"Upserted {len(chunk_ids)} chunks to vector store")
-        else:
-            logger.warning(f"No valid chunks to add for document {doc_id}")
-
-        # Store link relationships
-        self._store_link_relationships(doc_id, chunks, metadata)
-
-        # Store document metadata for update tracking
-        if metadata and "modified_time" in metadata:
-            self._retry_operation(
-                self.metadata_collection.upsert,
-                ids=[doc_id],
-                metadatas=[{"modified_time": metadata["modified_time"]}],
-                embeddings=[
-                    [1.0] * self.embedding_dims
-                ],  # Dummy embedding for metadata tracking
-                documents=[""],  # Empty document as it's just for tracking
-            )
-
-        logger.info(
-            f"Added document {doc_id} with {len(chunks)} chunks to vector store"
-        )
 
     def find_similar(
         self,
@@ -544,11 +576,11 @@ class VectorStoreService:
             if metadata is None:
                 try:
                     # Preserve existing metadata if not provided
-                    existing_meta = self.metadata_collection.get(
+                    existing_meta = self.collections["metadata"].get(
                         ids=[doc_id], include=["metadatas"]
                     )
-                    metadata = (existing_meta.get("metadatas", [{}])[0] 
-                              if existing_meta and existing_meta.get("ids") 
+                    metadata = (existing_meta.get("metadatas", [{}])[0]
+                              if existing_meta and existing_meta.get("ids")
                               else {})
                 except Exception as e:
                     logger.warning(f"Error retrieving existing metadata for {doc_id}: {str(e)}")

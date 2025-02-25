@@ -3,6 +3,9 @@
 import logging
 import os
 import re
+import json
+import hashlib
+import time
 from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
@@ -21,55 +24,246 @@ class LinkService:
         self.vector_store = vector_store
         self.chunking_service = chunking_service or vector_store.chunking_service
         self.embedding_service = embedding_service or vector_store.embedding_service
-        self.base_path = os.path.expanduser(
-            vector_store.config.get("path", "~/Documents/notes")
-        )
-        self.base_path = os.path.dirname(
-            self.base_path
-        )  # Get parent directory of .vector_store
 
-    def analyze_relationships(self, note_id: str) -> Dict[str, Any]:
+        # Get the notes base directory from config and ensure it's absolute
+        self.base_path = os.path.expanduser(
+            self.vector_store.config.get("notes_base_dir", "~/Documents/notes")
+        )
+        # Ensure base_path is absolute
+        self.base_path = os.path.abspath(self.base_path)
+
+        # Get the base directory name for path extraction
+        self.base_dir_name = os.path.basename(self.base_path)
+
+        # Get the parent directory of base_path
+        self.parent_dir = os.path.dirname(self.base_path)
+
+        logger.info(f"Using notes base directory: {self.base_path}")
+        logger.info(f"Base directory name: {self.base_dir_name}")
+        logger.info(f"Parent directory: {self.parent_dir}")
+
+        # Store analysis state alongside vector store data
+        vector_store_dir = os.path.join(self.base_path, ".vector_store")
+        self.analysis_state_file = os.path.join(vector_store_dir, ".note_analysis_state")
+
+        # Ensure vector store directory exists
+        os.makedirs(vector_store_dir, exist_ok=True)
+
+        self._load_analysis_state()
+
+    def _load_analysis_state(self) -> None:
+        """Load the analysis state from disk."""
+        try:
+            with open(self.analysis_state_file, "r") as f:
+                self.analysis_state = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            self.analysis_state = {}
+
+    def _save_analysis_state(self) -> None:
+        """Save the analysis state to disk."""
+        with open(self.analysis_state_file, "w") as f:
+            json.dump(self.analysis_state, f, indent=2)
+
+    def _get_content_hash(self, content: str) -> str:
+        """Generate a hash of the note content, ignoring the auto-generated references section."""
+        # Split at the auto-generated references section if it exists
+        if "## Auto generated references" in content:
+            content = content.split("## Auto generated references")[0].rstrip()
+            # Remove trailing horizontal rule if present
+            if content.endswith("\n---"):
+                content = content[:-4].rstrip()
+            elif content.endswith("\n---\n"):
+                content = content[:-5].rstrip()
+        return hashlib.md5(content.encode()).hexdigest()
+
+    def _needs_analysis(self, note_id: str, content: str) -> bool:
+        """
+        Check if a note needs to be analyzed based on its content hash and last analysis time.
+
+        Args:
+            note_id: ID of the note
+            content: Current content of the note
+
+        Returns:
+            bool: True if the note needs analysis, False otherwise
+        """
+        current_hash = self._get_content_hash(content)
+        state = self.analysis_state.get(note_id, {})
+
+        # If no previous analysis or content has changed
+        if not state or state.get("content_hash") != current_hash:
+            return True
+
+        return False
+
+    def _update_analysis_state(self, note_id: str, content: str) -> None:
+        """
+        Update the analysis state for a note.
+
+        Args:
+            note_id: ID of the note
+            content: Current content of the note
+        """
+        self.analysis_state[note_id] = {
+            "content_hash": self._get_content_hash(content),
+            "last_analyzed": time.time()
+        }
+        self._save_analysis_state()
+
+    def analyze_relationships(self, note_id: str, auto_index: bool = False) -> Dict[str, Any]:
         """
         Analyze relationships for a specific note.
 
         Args:
             note_id: ID of the note to analyze
+            auto_index: Whether to automatically index the note if not found in vector store
 
         Returns:
             Dictionary containing relationship analysis
         """
-        # Normalize the path
-        note_id = os.path.normpath(note_id)
-        # Convert absolute path to relative if it's under the notes directory
-        config = self.vector_store.config
-        base_dir = os.path.basename(config.get("notes_base_dir", "~/Documents/notes"))
-        if f"{base_dir}/" in note_id:
-            note_id = note_id.split(f"{base_dir}/")[-1]
-        logger.info(f"Starting relationship analysis for note: {note_id}")
+        try:
+            # Convert to absolute path if it's not already
+            if not os.path.isabs(note_id):
+                note_id = os.path.join(self.base_path, note_id)
 
-        # Get existing connections
-        direct_links = self.vector_store.find_connected_notes(note_id)
-        logger.info(f"Found {len(direct_links)} direct links")
+            # Normalize the path
+            note_id = os.path.normpath(note_id)
+            logger.debug(f"Analyzing note with absolute path: {note_id}")
 
-        # Find semantic relationships
-        note_content = self.vector_store.get_note_content(note_id)
-        logger.info(f"Retrieved note content: {'Yes' if note_content else 'No'}")
-        if note_content:
+            # Make the path relative to base_path for vector store operations
+            relative_note_id = self._get_relative_note_id(note_id)
+            logger.debug(f"Final relative note ID: {relative_note_id}")
+
+            # Check if file exists
+            if not os.path.exists(note_id):
+                logger.warning(f"Note file not found: {note_id}")
+                return {
+                    "direct_links": [],
+                    "semantic_links": [],
+                    "backlinks": [],
+                    "suggested_links": []
+                }
+
+            # Get note content using relative path
+            note_content = self.vector_store.get_note_content(relative_note_id)
+
+            # If note is not in vector store, read it from file and index it if auto_index is True
+            if not note_content:
+                if auto_index:
+                    logger.info(f"Note {relative_note_id} not found in vector store, indexing it now")
+                    try:
+                        with open(note_id, "r") as f:
+                            file_content = f.read()
+
+                        # Get file metadata
+                        stat = os.stat(note_id)
+                        metadata = {
+                            "id": relative_note_id,
+                            "path": note_id,
+                            "modified_time": stat.st_mtime,
+                            "created_time": stat.st_ctime,
+                            "type": "note"
+                        }
+
+                        # Generate chunks and embeddings
+                        chunks = self.chunking_service.chunk_document(file_content, doc_type="note")
+                        if not chunks:
+                            logger.warning(f"No chunks generated for note: {relative_note_id}")
+                            return {
+                                "direct_links": [],
+                                "semantic_links": [],
+                                "backlinks": [],
+                                "suggested_links": []
+                            }
+
+                        chunk_texts = [chunk["content"] for chunk in chunks]
+                        embeddings = self.embedding_service.embed_chunks(chunk_texts)
+
+                        # Add document to vector store
+                        self.vector_store.add_document(
+                            doc_id=relative_note_id,
+                            chunks=chunk_texts,
+                            embeddings=embeddings,
+                            metadata=metadata
+                        )
+
+                        # Get note content again after indexing
+                        note_content = self.vector_store.get_note_content(relative_note_id)
+                        if not note_content:
+                            logger.error(f"Failed to index note: {relative_note_id}")
+                            return {
+                                "direct_links": [],
+                                "semantic_links": [],
+                                "backlinks": [],
+                                "suggested_links": []
+                            }
+                    except Exception as e:
+                        logger.error(f"Error indexing note {relative_note_id}: {str(e)}")
+                        return {
+                            "direct_links": [],
+                            "semantic_links": [],
+                            "backlinks": [],
+                            "suggested_links": []
+                        }
+                else:
+                    logger.warning(f"Could not get content for note: {relative_note_id} (auto-indexing disabled)")
+                    return {
+                        "direct_links": [],
+                        "semantic_links": [],
+                        "backlinks": [],
+                        "suggested_links": []
+                    }
+
+            # Check if we need to analyze this note
+            if not self._needs_analysis(relative_note_id, note_content["content"]):
+                logger.info(f"Skipping analysis for {relative_note_id} - content unchanged since last analysis")
+                return {
+                    "direct_links": self.vector_store.find_connected_notes(relative_note_id),
+                    "semantic_links": [],  # Skip semantic analysis for unchanged content
+                    "backlinks": self._find_backlinks(relative_note_id),
+                    "suggested_links": []  # Skip suggestions since content hasn't changed
+                }
+
+            logger.info(f"Starting relationship analysis for note: {relative_note_id}")
+
+            # Get existing connections
+            direct_links = self.vector_store.find_connected_notes(relative_note_id)
+            logger.info(f"Found {len(direct_links)} direct links")
+
+            # Find semantic relationships
             semantic_links = self.vector_store.find_similar(
-                query_embedding=note_content["embedding"], limit=5, threshold=0.6
+                query_embedding=note_content["embedding"],
+                limit=5,  # Keep original limit for semantic links
+                threshold=0.6,  # Keep original threshold for semantic links
             )
-        else:
-            semantic_links = []
 
-        # Get backlinks
-        backlinks = self._find_backlinks(note_id)
+            # Get backlinks
+            backlinks = self._find_backlinks(relative_note_id)
 
-        return {
-            "direct_links": direct_links,
-            "semantic_links": semantic_links,
-            "backlinks": backlinks,
-            "suggested_links": self._suggest_connections(note_id, direct_links, backlinks),
-        }
+            # Get suggested connections
+            suggested_links = self._suggest_connections(relative_note_id, direct_links, backlinks)
+
+            # Update analysis state and vector store
+            self._update_analysis_state(relative_note_id, note_content["content"])
+            current_time = time.time()
+            self.vector_store.set_last_update_time(current_time)
+            logger.info(f"Updated last_update timestamp to {current_time}")
+
+            return {
+                "direct_links": direct_links,
+                "semantic_links": semantic_links,
+                "backlinks": backlinks,
+                "suggested_links": suggested_links,
+            }
+
+        except Exception as e:
+            logger.error(f"Error analyzing relationships for {note_id}: {str(e)}")
+            return {
+                "direct_links": [],
+                "semantic_links": [],
+                "backlinks": [],
+                "suggested_links": []
+            }
 
     def _find_backlinks(self, note_id: str) -> List[Dict[str, Any]]:
         """
@@ -196,24 +390,31 @@ class LinkService:
         note_path = os.path.expanduser(note_path)
 
         # Get relative ID for vector store
-        note_id = note_path
-        base_dir = os.path.basename(self.vector_store.config.get("notes_base_dir", "~/Documents/notes"))
-        if f"{base_dir}/" in note_path:
-            note_id = note_path.split(f"{base_dir}/")[-1]
+        note_id = self._get_relative_note_id(note_path)
+
+        logger.debug(f"Using note ID: {note_id} for path: {note_path}")
 
         try:
             # Read the entire file first
             with open(note_path, "r") as f:
                 original_content = f.read()
 
-            # Split content at horizontal line if it exists
-            if "\n---\n" in original_content:
-                content_parts = original_content.split("\n---\n", 1)
-                main_content = content_parts[0]
-                links_section = content_parts[1] if len(content_parts) > 1 else ""
+            # Split content at the auto-generated references section if it exists
+            if "## Auto generated references" in original_content:
+                main_content = original_content.split("## Auto generated references")[0].rstrip()
+                # Remove any trailing horizontal rule if it's right before the auto-generated section
+                if main_content.endswith("\n---\n"):
+                    main_content = main_content[:-5].rstrip()
             else:
-                main_content = original_content
-                links_section = ""
+                # Split at horizontal rule if it exists
+                if "\n---\n" in original_content:
+                    parts = original_content.split("\n---\n", 1)
+                    main_content = parts[0]
+                    # Keep any non-auto-generated content after the horizontal rule
+                    if len(parts) > 1 and parts[1].strip():
+                        main_content += "\n---\n" + parts[1]
+                else:
+                    main_content = original_content
 
             # Process links to add
             new_links = []
@@ -224,32 +425,29 @@ class LinkService:
                     alias = link.get("alias") or self._generate_alias(target)
                     new_link = f"[[{target}|{alias}]]"
 
-                    # Check if link already exists in either section
-                    if not self._has_wiki_link(main_content + links_section, target):
+                    # Check if link already exists in main content
+                    if not self._has_wiki_link(main_content, target):
                         new_links.append(new_link)
 
                         # Update backlinks in target note if requested
                         if update_backlinks:
+                            # Pass the target ID directly, not a path constructed from the current note path
                             self._update_target_backlinks(target, note_id, note_path)
 
+            # Only add the auto-generated section if we have links to add
             if new_links:
-                # Construct updated content while preserving both sections
+                # Start with the main content
                 updated_content = main_content.rstrip()
 
-                # If we have existing links section, preserve it and add new links
-                if links_section:
-                    updated_content += "\n---\n" + links_section.rstrip()
-                    # Add header and new links if they don't exist
-                    if "## Auto generated references" not in updated_content:
-                        updated_content += "\n\n## Auto generated references"
-                    # Add new links at the end of existing links section
-                    for link in new_links:
-                        updated_content += f"\n{link}"
-                else:
-                    # No existing links section, create new one with header
-                    updated_content += "\n\n---\n## Auto generated references"
-                    for link in new_links:
-                        updated_content += f"\n{link}"
+                # Add horizontal rule if not present
+                if not updated_content.endswith("\n---\n"):
+                    updated_content += "\n\n---"
+
+                # Add the auto-generated references section
+                updated_content += "\n\n## Auto generated references"
+                for link in new_links:
+                    updated_content += f"\n{link}"
+                updated_content += "\n"
 
                 # Write changes to the file
                 with open(note_path, "w") as f:
@@ -257,9 +455,15 @@ class LinkService:
                     f.write(updated_content)
                 logger.info(f"Updated links in file: {note_path}")
 
+                # Update analysis state
+                self._update_analysis_state(note_id, updated_content)
+
                 # Update the vector store if not skipped
                 if not skip_vector_update:
                     self._update_vector_store(note_id, updated_content)
+                    current_time = time.time()
+                    self.vector_store.set_last_update_time(current_time)
+                    logger.info(f"Updated last_update timestamp to {current_time}")
             else:
                 logger.info(f"No new links to add for: {note_path}")
 
@@ -342,33 +546,54 @@ class LinkService:
             source_id: ID of the source note
             source_path: Path to the source note
         """
-        # Get target note content
+        # Get target note content and path
         note_content = self.vector_store.get_note_content(target_id)
         if not note_content:
-            logger.warning(f"Could not get content for note: {target_id}")
+            logger.warning(f"Could not get content for target note: {target_id}")
             return
 
-        # Read the current content
+        # Construct target note path
+        # First convert to absolute path if it's not already
+        if not os.path.isabs(target_id):
+            # Use the base_path directly to construct the target path
+            target_path = os.path.join(self.base_path, target_id)
+            logger.debug(f"Constructed target path from base_path: {target_path}")
+        else:
+            target_path = target_id
+            logger.debug(f"Using absolute target path: {target_path}")
+
+        logger.debug(f"Looking for target note at: {target_path}")
+
+        if not os.path.exists(target_path):
+            logger.warning(f"Target note file not found: {target_path}")
+            return
+
         try:
-            with open(source_path, "r") as f:
+            # Read the target note content
+            with open(target_path, "r") as f:
                 content = f.read()
-        except IOError as e:
-            logger.error(f"Error reading file {source_path}: {str(e)}")
-            return
 
-        # Add backlink if it doesn't exist
-        if f"[[{source_id}]]" not in content:
-            # Add backlink at the end of the file
-            if not content.endswith("\n"):
-                content += "\n"
-            content += f"\n[[{source_id}]]\n"
+            # Check if backlink already exists
+            if f"[[{source_id}]]" not in content:
+                # Add backlink at the end of the file
+                if not content.endswith("\n"):
+                    content += "\n"
 
-            # Write updated content
-            try:
-                with open(source_path, "w") as f:
+                # Add auto-generated references section if it doesn't exist
+                if "## Auto generated references" not in content:
+                    content += "\n---\n\n## Auto generated references\n"
+
+                # Add the backlink
+                content += f"[[{source_id}]]\n"
+
+                # Write updated content
+                with open(target_path, "w") as f:
                     f.write(content)
-            except IOError as e:
-                logger.error(f"Error writing file {source_path}: {str(e)}")
+                logger.info(f"Added backlink to {source_id} in {target_path}")
+
+        except IOError as e:
+            logger.error(f"Error updating backlinks in {target_path}: {str(e)}")
+            return
 
     def _update_vector_store(self, note_id: str, content: str) -> None:
         """
@@ -392,3 +617,36 @@ class LinkService:
             logger.info(f"Updated vector store for: {note_id}")
         except Exception as e:
             logger.error(f"Failed to update vector store for {note_id}: {str(e)}")
+
+    def _get_relative_note_id(self, path: str) -> str:
+        """
+        Convert an absolute path to a relative note ID for vector store operations.
+
+        Args:
+            path: Absolute or relative path to a note
+
+        Returns:
+            Relative note ID for vector store operations
+        """
+        # If it's already a relative path, return it as is
+        if not os.path.isabs(path):
+            return path
+
+        # Normalize the path
+        path = os.path.normpath(path)
+
+        # Try to make it relative to the base path
+        try:
+            if path.startswith(self.base_path):
+                return os.path.relpath(path, self.base_path)
+
+            # If it's not under base_path, check if it contains the base directory name
+            if f"/{self.base_dir_name}/" in path:
+                parts = path.split(f"/{self.base_dir_name}/")
+                if len(parts) > 1:
+                    return parts[1]
+        except Exception as e:
+            logger.warning(f"Error converting path to relative ID: {str(e)}")
+
+        # If all else fails, just return the basename
+        return os.path.basename(path)

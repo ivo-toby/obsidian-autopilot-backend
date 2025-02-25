@@ -73,7 +73,59 @@ def process_knowledge_base(cfg, cli_args):
         summary_service = SummaryService(cfg)
         link_service = LinkService(vector_store, chunking_service, embedding_service)
 
-        if cli_args.reindex or cli_args.update:
+        if cli_args.analyze_all or cli_args.analyze_updated:
+            logger.info("Analyzing notes for potential links...")
+
+            # Get notes to analyze
+            last_update = vector_store.get_last_update_time()
+            if cli_args.analyze_updated:
+                logger.info(
+                    f"Checking for notes modified since {datetime.fromtimestamp(last_update)}"
+                )
+                notes = [
+                    note
+                    for note in summary_service.get_all_notes()
+                    if note.get("modified_time", 0) > last_update
+                ]
+                if not notes:
+                    logger.info("No notes need updating")
+                    return
+                logger.info(f"Found {len(notes)} notes to analyze")
+            else:
+                notes = summary_service.get_all_notes()
+
+            # Process notes and add links
+            for note in notes:
+                try:
+                    logger.info(f"Analyzing links for: {note['path']}")
+                    # Pass auto_index=False to prevent automatic indexing during analysis
+                    analysis = link_service.analyze_relationships(note["path"], auto_index=False)
+                    _display_link_analysis(note["path"], analysis, cfg)
+
+                    # Update links based on suggestions
+                    if not cli_args.dry_run and analysis["suggested_links"]:
+                        links_to_add = [
+                            {
+                                "add_wiki_link": True,
+                                "target_id": suggestion["note_id"],
+                                "alias": None,  # Let the service generate an alias
+                            }
+                            for suggestion in analysis["suggested_links"]
+                        ]
+                        # Add links without updating vector store since we're only adding references
+                        link_service.update_obsidian_links(note["path"], links_to_add, update_backlinks=True, skip_vector_update=True)
+                        logger.info(f"Links updated successfully for: {note['path']}")
+                except Exception as e:
+                    logger.error(f"Error analyzing note {note['path']}: {str(e)}")
+                    continue
+
+            # Update the last update time to mark these notes as processed
+            if not cli_args.dry_run:
+                current_time = time.time()
+                vector_store.set_last_update_time(current_time)
+                logger.info(f"Updated last_update timestamp to {datetime.fromtimestamp(current_time)}")
+
+        elif cli_args.reindex or cli_args.update:
             if cli_args.reindex:
                 logger.info("Reindexing all notes...")
                 if not cli_args.dry_run:
@@ -98,26 +150,30 @@ def process_knowledge_base(cfg, cli_args):
             if not cli_args.dry_run:
                 current_time = time.time()
                 for note in notes:
-                    logger.info(f"Processing note: {note['id']}")
-                    chunks = chunking_service.chunk_document(
-                        note["content"], doc_type=note.get("type", "note")
-                    )
-                    if not chunks:
-                        logger.warning(f"No chunks generated for note: {note['id']}")
-                        continue
+                    try:
+                        logger.info(f"Processing note: {note['id']}")
+                        chunks = chunking_service.chunk_document(
+                            note["content"], doc_type=note.get("type", "note")
+                        )
+                        if not chunks:
+                            logger.warning(f"No chunks generated for note: {note['id']}")
+                            continue
 
-                    chunk_texts = [chunk["content"] for chunk in chunks]
-                    logger.info(
-                        f"Generating embeddings for {len(chunk_texts)} chunks..."
-                    )
-                    embeddings = embedding_service.embed_chunks(chunk_texts)
-                    logger.info("Embeddings generated successfully")
-                    vector_store.add_document(
-                        doc_id=note["id"],
-                        chunks=chunk_texts,
-                        embeddings=embeddings,
-                        metadata=note,
-                    )
+                        chunk_texts = [chunk["content"] for chunk in chunks]
+                        logger.info(
+                            f"Generating embeddings for {len(chunk_texts)} chunks..."
+                        )
+                        embeddings = embedding_service.embed_chunks(chunk_texts)
+                        logger.info("Embeddings generated successfully")
+                        vector_store.add_document(
+                            doc_id=note["id"],
+                            chunks=chunk_texts,
+                            embeddings=embeddings,
+                            metadata=note,
+                        )
+                    except Exception as e:
+                        logger.error(f"Error processing note {note['id']}: {str(e)}")
+                        continue
 
                 if cli_args.reindex or cli_args.update:
                     vector_store.set_last_update_time(current_time)
@@ -175,55 +231,11 @@ def process_knowledge_base(cfg, cli_args):
             except ValueError:
                 logger.error(f"Invalid date format. Please use {cfg['display']['date_format']}")
 
-        elif cli_args.analyze_all or cli_args.analyze_updated:
-            logger.info("Analyzing all notes for potential links...")
-            if cli_args.analyze_updated:
-                last_update = vector_store.get_last_update_time()
-                logger.info(
-                    f"Checking for notes modified since {datetime.fromtimestamp(last_update)}"
-                )
-                notes = [
-                    note
-                    for note in summary_service.get_all_notes()
-                    if note.get("modified_time", 0) > last_update
-                ]
-                if not notes:
-                    logger.info("No notes need updating")
-                    return
-                logger.info(f"Found {len(notes)} notes to analyze")
-            else:
-                notes = summary_service.get_all_notes()
-
-            # Process notes and add links
-            for note in notes:
-                logger.info(f"Analyzing links for: {note['path']}")
-                analysis = link_service.analyze_relationships(note["path"])
-                _display_link_analysis(note["path"], analysis, cfg)
-
-                # Update links based on suggestions
-                if not cli_args.dry_run and analysis["suggested_links"]:
-                    links_to_add = [
-                        {
-                            "add_wiki_link": True,
-                            "target_id": suggestion["note_id"],
-                            "alias": None,  # Let the service generate an alias
-                        }
-                        for suggestion in analysis["suggested_links"]
-                    ]
-                    # Add links without updating vector store since we're only adding references
-                    link_service.update_obsidian_links(note["path"], links_to_add, update_backlinks=True, skip_vector_update=True)
-                    logger.info(f"Links updated successfully for: {note['path']}")
-
-            # Update the last update time to mark these notes as processed
-            if not cli_args.dry_run:
-                current_time = time.time()
-                vector_store.set_last_update_time(current_time)
-                logger.info(f"Updated last_update timestamp to {datetime.fromtimestamp(current_time)}")
-
         elif cli_args.analyze_links:
             note_path = os.path.expanduser(cli_args.analyze_links)
             logger.info(f"Analyzing links for: {note_path}")
-            analysis = link_service.analyze_relationships(note_path)
+            # For individual analysis, we can enable auto-indexing
+            analysis = link_service.analyze_relationships(note_path, auto_index=True)
             _display_link_analysis(note_path, analysis, cfg)
 
             # Update links based on suggestions
