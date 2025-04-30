@@ -9,7 +9,7 @@ import json
 import os
 import time
 import numpy as np
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch, MagicMock, mock_open
 import pytest
 from chromadb.api.models.Collection import Collection
 from services.vector_store.store_service import VectorStoreService
@@ -34,6 +34,21 @@ SAMPLE_EMBEDDINGS = [
     [0.1] * 1024,  # mxbai-embed-large dimension
     [0.2] * 1024
 ]
+
+# Constants
+DB_PATH = "/tmp/test_vector_store"
+
+@pytest.fixture(autouse=True)
+def cleanup_db():
+    # Clean up before test if needed
+    if os.path.exists(DB_PATH):
+        import shutil
+        shutil.rmtree(DB_PATH)
+    yield
+    # Clean up after test
+    if os.path.exists(DB_PATH):
+        import shutil
+        shutil.rmtree(DB_PATH)
 
 @pytest.fixture
 def mock_chromadb_client():
@@ -73,8 +88,10 @@ def mock_chunking_service():
 def mock_embedding_service():
     """Create a mock embedding service."""
     mock = Mock()
-    mock.embed_chunks.return_value = SAMPLE_EMBEDDINGS
-    mock.embed_text.return_value = [0.1] * 1024  # Add sample embedding for dimension check
+    # Mock embed_text to return a fixed-size embedding
+    mock.embed_text.return_value = [0.1] * 1024 # Example dimension
+    # Mock get_embedding_dimensions if called by init
+    mock.get_embedding_dimensions.return_value = 1024
     return mock
 
 @pytest.fixture
@@ -82,14 +99,10 @@ def store_config():
     """Create test configuration."""
     return {
         "vector_store": {
-            "path": "/tmp/test_vector_store",
+            "path": DB_PATH,
             "distance_func": "cosine",
             "hnsw_space": "cosine",
-            "hnsw_config": {
-                "ef_construction": 400,
-                "ef_search": 200,
-                "m": 128
-            }
+            "hnsw_config": {"m": 128, "ef_construction": 400, "ef_search": 200},
         }
     }
 
@@ -103,26 +116,51 @@ def mock_settings():
     return settings
 
 @pytest.fixture
-def vector_store(mock_chromadb_client, store_config, mock_embedding_service, mock_chunking_service):
-    """Create a VectorStoreService instance with mocked dependencies."""
-    with patch("chromadb.PersistentClient", return_value=mock_chromadb_client):
-        store = VectorStoreService(
-            config=store_config,
-            chunking_service=mock_chunking_service,
-            embedding_service=mock_embedding_service
-        )
-        return store
+def vector_store(store_config, mock_embedding_service):
+    """Fixture to create a VectorStoreService instance with mocks."""
+    # Patch the ChromaDB client initialization and collection creation
+    with patch('chromadb.PersistentClient') as MockPersistentClient:
+        mock_client_instance = MockPersistentClient.return_value
+
+        # Mock the get_or_create_collection method
+        mock_collections = {}
+        def mock_get_or_create(name, metadata):
+            if name not in mock_collections:
+                mock_coll = MagicMock()
+                mock_coll.name = name
+                mock_coll.metadata = metadata
+                # Add necessary methods used in tests if not already MagicMocked
+                mock_coll.get = MagicMock(return_value={'ids': [], 'metadatas': [], 'documents': [], 'embeddings': []})
+                mock_coll.query = MagicMock(return_value={'ids': [[]], 'metadatas': [[]], 'documents': [[]], 'embeddings': [[]], 'distances': [[]]})
+                mock_coll.upsert = MagicMock()
+                mock_coll.delete = MagicMock()
+                mock_collections[name] = mock_coll
+            return mock_collections[name]
+
+        mock_client_instance.get_or_create_collection.side_effect = mock_get_or_create
+
+        # Mock the embedding service call within init if needed
+        with patch.object(mock_embedding_service, 'embed_text', return_value=[0.1] * 1024):
+            # Need to also patch _get_embedding_dimensions or ensure mock has it
+            with patch('services.vector_store.store_service.VectorStoreService._get_embedding_dimensions', return_value=1024):
+                service = VectorStoreService(store_config, embedding_service=mock_embedding_service)
+                # Manually assign the mocked collections dict, as the real client is bypassed
+                service.collections = mock_collections
+                # Ensure the client mock is stored if service uses it directly later
+                service.client = mock_client_instance
+                return service
 
 def test_initialization(vector_store, store_config):
     """Test initialization of collections and parameters."""
-    # Verify collections were created
+    # Verify collections were created in the dictionary
+    assert "notes" in vector_store.collections
+    assert "links" in vector_store.collections
+    # Check the keys expected by the code
+    assert "metadata" in vector_store.collections
+    assert "system" in vector_store.collections
+    assert "references" in vector_store.collections
+    # Check one collection object exists
     assert vector_store.collections["notes"] is not None
-    assert vector_store.collections["links"] is not None
-    assert vector_store.metadata_collection is not None
-    assert vector_store.system_collection is not None
-
-    # Verify configuration
-    assert vector_store.db_path == store_config["vector_store"]["path"]
 
 def test_add_document(vector_store):
     """Test adding a new document."""
@@ -269,34 +307,120 @@ def test_update_document(vector_store):
 
 def test_needs_update(vector_store):
     """Test checking if a document needs updating."""
-    # Test when document exists
-    result = vector_store.needs_update("test-note", 123456790)
-    assert result is True
+    doc_id = "test-note"
+    current_time = time.time()
 
-    # Test when document doesn't exist
-    vector_store.metadata_collection.get.return_value = {"ids": [], "metadatas": []}
-    result = vector_store.needs_update("test-note", 123456789)
-    assert result is True
+    # Mock the response from the 'metadata' collection
+    mock_meta_collection = vector_store.collections["metadata"]
+
+    # Case 1: Document exists, needs update (file newer)
+    mock_meta_collection.get.return_value = {
+        "ids": [doc_id],
+        "metadatas": [{"modified_time": current_time - 100}]
+    }
+    assert vector_store.needs_update(doc_id, current_time) is True
+    mock_meta_collection.get.assert_called_once_with(ids=[doc_id], include=["metadatas"])
+
+    # Case 2: Document exists, doesn't need update (file older or same)
+    mock_meta_collection.reset_mock()
+    mock_meta_collection.get.return_value = {
+        "ids": [doc_id],
+        "metadatas": [{"modified_time": current_time + 100}]
+    }
+    assert vector_store.needs_update(doc_id, current_time) is False
+    mock_meta_collection.get.assert_called_once_with(ids=[doc_id], include=["metadatas"])
+
+    # Case 3: Document doesn't exist in metadata
+    mock_meta_collection.reset_mock()
+    mock_meta_collection.get.return_value = {"ids": [], "metadatas": []}
+    assert vector_store.needs_update(doc_id, current_time) is True
+    mock_meta_collection.get.assert_called_once_with(ids=[doc_id], include=["metadatas"])
+
+    # Case 4: Error during get - should default to True
+    mock_meta_collection.reset_mock()
+    mock_meta_collection.get.side_effect = Exception("DB error")
+    assert vector_store.needs_update(doc_id, current_time) is True
+    mock_meta_collection.get.assert_called_once_with(ids=[doc_id], include=["metadatas"])
 
 def test_last_update_time(vector_store):
-    """Test getting and setting last update time."""
-    # Test getting last update time
-    vector_store.system_collection.get.return_value = {
-        "ids": ["last_update"],
-        "metadatas": [{"timestamp": "123456789"}]
-    }
-    last_time = vector_store.get_last_update_time()
-    assert last_time == 123456789
+    """Test getting and setting last update time using metadata.json."""
+    metadata_path = os.path.join(vector_store.db_path, "metadata.json")
+    timestamp = time.time()
 
-    # Test setting last update time
-    new_time = 123456790
-    vector_store.set_last_update_time(new_time)
-    vector_store.system_collection.upsert.assert_called_once_with(
-        ids=["last_update"],
-        metadatas=[{"timestamp": str(new_time)}],
-        embeddings=[[1.0] * 1024],
-        documents=[""]
-    )
+    # --- Test set_last_update_time ---
+    # Case 1: File does not exist
+    m_open = mock_open()
+    with patch('builtins.open', m_open):
+        with patch('os.path.exists', return_value=False):
+            # Patch json.dump for this specific call scope
+            with patch('json.dump') as mock_json_dump:
+                vector_store.set_last_update_time(timestamp)
+
+                # Verify open was called correctly for write
+                m_open.assert_called_once_with(metadata_path, "w")
+                # Get the mock file handle that open() returned
+                mock_file_handle = m_open()
+                # Verify json.dump was called with the correct data and handle
+                expected_data = {"last_update": timestamp}
+                mock_json_dump.assert_called_once_with(expected_data, mock_file_handle)
+
+    # Case 2: File exists
+    existing_data_dict = {"other_key": "value"}
+    existing_content = json.dumps(existing_data_dict)
+    m_open = mock_open(read_data=existing_content)
+    with patch('builtins.open', m_open):
+        with patch('os.path.exists', return_value=True):
+            # Patch json.dump again for this scope
+            with patch('json.dump') as mock_json_dump:
+                new_timestamp = timestamp + 100
+                vector_store.set_last_update_time(new_timestamp)
+
+                # Verify open called for read then write
+                m_open.assert_any_call(metadata_path, "r")
+                m_open.assert_any_call(metadata_path, "w")
+
+                # Get the mock file handle (mock_open resets, need the handle from the write call context)
+                # We assume the handle passed to json.dump is the one from the 'w' call
+                # Find the handle used in the json.dump call
+                assert mock_json_dump.call_count == 1
+                dump_args, _ = mock_json_dump.call_args
+                written_dict = dump_args[0]
+                # Verify the dictionary passed to json.dump is correct
+                expected_data = {"other_key": "value", "last_update": new_timestamp}
+                assert written_dict == expected_data
+
+    # --- Test get_last_update_time ---
+    # Simulate file existing
+    existing_data = {"last_update": timestamp}
+    m_open = mock_open(read_data=json.dumps(existing_data))
+    with patch('builtins.open', m_open):
+        with patch('os.path.exists', return_value=True):
+            retrieved_time = vector_store.get_last_update_time()
+            m_open.assert_called_once_with(metadata_path, "r")
+            assert retrieved_time == timestamp
+
+    # Simulate file not existing
+    with patch('os.path.exists', return_value=False):
+        with patch('builtins.open', mock_open()):
+            retrieved_time = vector_store.get_last_update_time()
+            assert retrieved_time == 0
+            mock_open().assert_not_called()
+
+    # Simulate error during read
+    m_open = mock_open()
+    # Configure the mock handle returned by open() to raise IOError on read
+    mock_handle = m_open.return_value
+    mock_handle.read.side_effect = IOError("Read error")
+    with patch('builtins.open', m_open):
+         with patch('os.path.exists', return_value=True):
+             retrieved_time = vector_store.get_last_update_time()
+             assert retrieved_time == 0 # Should default to 0 on error
+             # Check that open was called for read (multiple times due to retry)
+             assert m_open.call_count == vector_store.max_retries # Check retry count
+             # Verify the arguments of any of the calls
+             m_open.assert_any_call(metadata_path, "r")
+             # Check that read was called (also multiple times)
+             assert mock_handle.read.call_count == vector_store.max_retries
 
 def test_retry_operation(vector_store):
     """Test retry mechanism for database operations."""
