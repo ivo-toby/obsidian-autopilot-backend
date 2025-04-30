@@ -12,6 +12,9 @@ from services.notes_service import NotesService
 from services.openai_service import OpenAIService
 from utils.file_handler import create_output_dir, write_summary_to_file
 from utils.markdown import create_meeting_notes_content
+import pyperclip
+import re
+from pathlib import Path
 
 
 class MeetingService:
@@ -56,6 +59,67 @@ class MeetingService:
         else:
             for meeting in meeting_notes.get("meetings", []):
                 print(meeting)
+
+    def process_meeting_transcript(
+        self, date_str: Optional[str] = None, dry_run: bool = False,
+        prompt_file: Optional[str] = None
+    ) -> None:
+        """
+        Process a full meeting transcript from the clipboard to generate a summary.
+
+        Args:
+            date_str (str, optional): Date to use for the filename. Defaults to None (today).
+            dry_run (bool): If True, don't write files. Defaults to False.
+            prompt_file (str, optional): Path to the prompt template file. Defaults to None
+                                        (uses prompts/MEETING_PROMPT.md).
+        """
+        transcript = pyperclip.paste()
+        if not transcript.strip():
+            print("Clipboard is empty or not text.")
+            return
+
+        # Load prompt template
+        if prompt_file is None:
+            prompt_file = Path(__file__).parent.parent / "prompts" / "MEETING_PROMPT.md"
+        else:
+            prompt_file = Path(prompt_file)
+
+        if not prompt_file.exists():
+            print(f"Prompt file not found: {prompt_file}")
+            return
+
+        template = prompt_file.read_text()
+
+        # Combine template and transcript
+        full_prompt = f"{template}\n\n'''TRANSCRIPT'''\n{transcript}"
+
+        # Call the LLM
+        summary_text = self.openai_service.generate_text(full_prompt)
+
+        # Output or save
+        if dry_run:
+            print(summary_text)
+        else:
+            self._save_raw_summary(summary_text, date_str)
+
+    def _save_raw_summary(
+        self, summary_text: str, date_str: Optional[str] = None
+    ) -> None:
+        """
+        Save raw summary markdown text using configured output directory and naming.
+        """
+        ds = date_str or datetime.now().strftime("%Y-%m-%d")
+        # Extract topic from first markdown heading
+        match = re.match(r"#\s*\[(.*?)\]", summary_text)
+        topic = (
+            match.group(1).strip().replace(" ", "_").lower() if match else "meeting"
+        )
+        filename = f"{ds}_{topic}.md"
+        outdir = create_output_dir(
+            os.path.expanduser(self.config["meeting_notes_output_dir"])
+        )
+        target_path = os.path.join(outdir, filename)
+        write_summary_to_file(target_path, summary_text)
 
     def _save_meeting_notes(
         self, meeting_data: Dict, output_dir: Optional[str] = None

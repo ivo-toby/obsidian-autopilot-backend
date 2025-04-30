@@ -7,6 +7,7 @@ A Python tool for processing and enriching your Obsidian notes, providing automa
 ## Key Features
 
 - **Note Processing**
+
   - Generate daily and weekly summaries
   - Extract and structure meeting notes
   - Identify action items and add them to Apple Reminders
@@ -19,6 +20,28 @@ A Python tool for processing and enriching your Obsidian notes, providing automa
   - Create backlinks automatically
   - Visualize note connections in graph format
 
+## Meeting Transcripts from Clipboard
+
+You can use the clipboard to process meeting transcripts directly:
+
+1. Copy the full meeting transcript to your clipboard
+2. Run the command:
+   ```bash
+   python main.py notes --from-clipboard
+   ```
+
+This will:
+
+- Take the transcript from your clipboard
+- Process it with the meeting notes prompt
+- Save a formatted summary to your configured meeting notes directory
+
+You can also specify a custom prompt file:
+
+```bash
+python main.py notes --from-clipboard --prompt-file /path/to/custom_prompt.md
+```
+
 ## Installation
 
 ### Prerequisites
@@ -30,12 +53,14 @@ A Python tool for processing and enriching your Obsidian notes, providing automa
 ### Quick Start
 
 1. Clone the repository:
+
    ```bash
    git clone https://github.com/ivo-toby/gpt-notes-to-tasks.git
    cd gpt-notes-to-tasks
    ```
 
 2. Create and activate virtual environment:
+
    ```bash
    python -m venv .venv
    source .venv/bin/activate  # On Unix/macOS
@@ -44,6 +69,7 @@ A Python tool for processing and enriching your Obsidian notes, providing automa
    ```
 
 3. Install dependencies:
+
    ```bash
    pip install -r requirements.txt
    ```
@@ -79,6 +105,7 @@ python main.py notes --process-learnings
 ```
 
 Options:
+
 - `--date`: Specify date (YYYY-MM-DD, "today", or "yesterday")
 - `--dry-run`: Preview changes without making modifications
 - `--skip-reminders`: Don't create Apple Reminders tasks
@@ -119,6 +146,7 @@ python main.py kb --note-structure "path/to/note.md"
 ```
 
 Options:
+
 - `--limit`: Maximum number of results (default: 5)
 - `--dry-run`: Preview changes without modifications
 - `--note-type`: Filter by note type (daily, weekly, meeting, learning, note)
@@ -130,6 +158,7 @@ Options:
 ### Daily Note Taking Workflow
 
 1. Start your day by processing yesterday's notes:
+
    ```bash
    python main.py notes --date yesterday
    ```
@@ -137,13 +166,14 @@ Options:
 2. Throughout the day, take notes in your daily notes file
 
 3. End of day processing:
+
    ```bash
    # Process today's notes and create summaries
    python main.py notes
-   
+
    # Update knowledge base with new content
    python main.py kb --update
-   
+
    # Analyze new connections
    python main.py kb --analyze-updated --auto-link
    ```
@@ -151,11 +181,13 @@ Options:
 ### Weekly Review Process
 
 1. Generate weekly summary:
+
    ```bash
    python main.py notes --weekly
    ```
 
 2. Process learnings:
+
    ```bash
    python main.py notes --process-learnings
    ```
@@ -168,12 +200,14 @@ Options:
 ### Knowledge Base Maintenance
 
 1. Regular updates (daily/after changes):
+
    ```bash
    python main.py kb --update
    python main.py kb --analyze-updated
    ```
 
 2. Full reindex (monthly or after major changes):
+
    ```bash
    rm -rf ~/Documents/notes/.vector_store
    python main.py kb --reindex
@@ -181,13 +215,14 @@ Options:
    ```
 
 3. Finding Related Content:
+
    ```bash
    # Search by content
    python main.py kb --query "project planning" --limit 10
-   
+
    # Find notes with specific tag
    python main.py kb --find-by-tag "project" --note-type meeting
-   
+
    # Show connections for a note
    python main.py kb --show-connections "path/to/note.md" --graph
    ```
@@ -195,6 +230,7 @@ Options:
 ### Troubleshooting Command
 
 Analyze note structure to understand how it's being processed:
+
 ```bash
 python main.py kb --note-structure "path/to/note.md"
 ```
@@ -232,12 +268,12 @@ embeddings:
 ```yaml
 vector_store:
   path: "~/Documents/notes/.vector_store"
-  similarity_threshold: 0.60  # For normalized embeddings
+  similarity_threshold: 0.60 # For normalized embeddings
   # HNSW index settings - adjust if you get "ef or M is too small" errors
   hnsw_config:
-    ef_construction: 800  # Higher = better index quality, slower build (default: 400)
-    ef_search: 400      # Higher = more accurate search, slower queries (default: 200)
-    m: 256             # Higher = better accuracy, more memory usage (default: 128)
+    ef_construction: 800 # Higher = better index quality, slower build (default: 400)
+    ef_search: 400 # Higher = more accurate search, slower queries (default: 200)
+    m: 256 # Higher = better accuracy, more memory usage (default: 128)
 ```
 
 If you're processing a large number of notes or getting HNSW errors, try increasing these values.
@@ -257,6 +293,7 @@ search:
 ### Setting Up Your Notes Repository
 
 1. Create basic structure:
+
    ```bash
    mkdir -p ~/Documents/notes/{daily,weekly,meetingnotes,learnings}
    ```
@@ -285,6 +322,7 @@ search:
 ### Weekly Workflow
 
 1. Generate weekly summary:
+
    ```bash
    python main.py notes --weekly
    ```
@@ -301,6 +339,7 @@ search:
 Two primary options are available:
 
 1. **OpenAI (text-embedding-3-small)**
+
    - Normalized embeddings (0-1 range)
    - Typical scores: 0.35-0.45
    - Requires API key and internet connection
@@ -314,6 +353,7 @@ Two primary options are available:
 ### Maintenance
 
 1. Monthly vector store optimization:
+
    ```bash
    rm -rf ~/Documents/notes/.vector_store
    python main.py kb --reindex
@@ -326,6 +366,7 @@ Two primary options are available:
 ### Troubleshooting
 
 1. Enable debug logging:
+
    ```yaml
    # In config.yaml
    logging:
@@ -333,13 +374,14 @@ Two primary options are available:
    ```
 
 2. Common fixes:
+
    ```bash
    # Clear vector store
    rm -rf ~/Documents/notes/.vector_store
-   
+
    # Rebuild index
    python main.py kb --reindex
-   
+
    # Check Ollama service
    curl http://localhost:11434/api/embeddings
    ```
@@ -347,6 +389,7 @@ Two primary options are available:
 ## Acknowledgments
 
 This tool was created using:
+
 - CodeLLama
 - GPT-4o
 - Claude 3.5 Sonnet

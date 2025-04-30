@@ -11,6 +11,7 @@ import os
 import time
 from datetime import datetime
 from typing import Any, Dict
+import sys
 
 from services.knowledge.link_service import LinkService
 from services.learning_service import LearningService
@@ -47,11 +48,20 @@ def process_weekly_notes(cfg, cli_args):
 
 
 def process_meeting_notes(cfg, cli_args):
-    """Process daily notes to generate structured meeting notes."""
+    """Process meeting notes: either from daily notes, or if --from-clipboard is set, from the system clipboard."""
     meeting_service = MeetingService(cfg)
-    meeting_service.process_meeting_notes(
-        date_str=cli_args.date, dry_run=cli_args.dry_run
-    )
+    if getattr(cli_args, "from_clipboard", False):
+        # Check if custom prompt file was specified
+        prompt_file = getattr(cli_args, "prompt_file", None)
+        meeting_service.process_meeting_transcript(
+            date_str=cli_args.date,
+            dry_run=cli_args.dry_run,
+            prompt_file=prompt_file
+        )
+    else:
+        meeting_service.process_meeting_notes(
+            date_str=cli_args.date, dry_run=cli_args.dry_run
+        )
 
 
 def process_new_learnings(cfg, cli_args):
@@ -262,24 +272,24 @@ def process_knowledge_base(cfg, cli_args):
                 _display_note_structure(chunks, cfg)
             except FileNotFoundError:
                 logger.error(f"Note not found: {note_path}")
-                
+
         elif cli_args.debug_store:
             # Debug the vector store contents
             logger.info("Debugging vector store contents...")
             debug_info = vector_store.debug_store_contents()
-            
+
             print("\nVector Store Debug Information:")
             for collection_name, info in debug_info.items():
                 print(f"\nCollection: {collection_name}")
                 if "error" in info:
                     print(f"  Error: {info['error']}")
                     continue
-                    
+
                 print(f"  Document count: {info['count']}")
                 print("  Document types:")
                 for doc_type, count in info.get("doc_types", {}).items():
                     print(f"    - {doc_type}: {count}")
-                
+
                 if info.get("sample_ids"):
                     print("  Sample IDs:")
                     for sample_id in info["sample_ids"]:
@@ -397,7 +407,10 @@ if __name__ == "__main__":
     logging.getLogger("services.vector_store.store_service").setLevel(logging.DEBUG)
 
     if args.command == "notes":
-        if args.process_learnings:
+        if args.from_clipboard:
+            process_meeting_notes(cfg, args)
+            sys.exit(0)
+        elif args.process_learnings:
             process_new_learnings(cfg, args)
         elif args.meetingnotes:
             process_meeting_notes(cfg, args)
@@ -411,12 +424,13 @@ if __name__ == "__main__":
         process_knowledge_base(cfg, args)
     else:
         # Default behavior for backward compatibility
-        if hasattr(args, "process_learnings") and args.process_learnings:
+        if args.from_clipboard:
+            process_meeting_notes(cfg, args)
+            sys.exit(0)
+        elif hasattr(args, "process_learnings") and args.process_learnings:
             process_new_learnings(cfg, args)
         elif hasattr(args, "meetingnotes") and args.meetingnotes:
             process_meeting_notes(cfg, args)
-        elif hasattr(args, "weekly") and args.weekly:
-            process_weekly_notes(cfg, args)
         else:
             process_daily_notes(cfg, args)
             process_meeting_notes(cfg, args)

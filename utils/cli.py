@@ -57,6 +57,16 @@ def setup_argparser() -> argparse.ArgumentParser:
     notes_parser.add_argument(
         "--process-learnings", action="store_true", help="Process new learnings"
     )
+    notes_parser.add_argument(
+        "--from-clipboard",
+        action="store_true",
+        help="Read a full meeting transcript from the system clipboard instead of daily notes"
+    )
+    notes_parser.add_argument(
+        "--prompt-file",
+        type=str,
+        help="Path to a custom prompt file for the meeting transcript feature"
+    )
 
     # Vector store commands
     kb_parser = subparsers.add_parser("kb", help="Knowledge base operations")

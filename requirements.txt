@@ -5,3 +5,4 @@ scikit_learn==1.5.1
 chromadb==0.4.24
 tqdm==4.66.2
 numpy<2.0.0  # Pin numpy to version before 2.0
+pyperclip==1.8.2

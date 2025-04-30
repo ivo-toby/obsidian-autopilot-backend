@@ -173,3 +173,76 @@ def test_process_meeting_notes_with_date(meeting_service, sample_meeting_data):
 
     # Assert
     meeting_service.notes_service.extract_today_notes.assert_called_once_with(mock_notes, test_date)
+
+
+def test_process_meeting_transcript_writes_file(meeting_service, temp_dir, monkeypatch):
+    """Test processing meeting transcript writes file correctly."""
+    sample_summary = "# [Team Sync]\nThis is a summary."
+    # Monkey-patch clipboard paste
+    import services.meeting_service as ms
+    monkeypatch.setattr(ms.pyperclip, "paste", lambda: "dummy transcript")
+    # Monkey-patch the LLM call
+    meeting_service.openai_service.generate_text = Mock(return_value=sample_summary)
+
+    # Execute
+    meeting_service.process_meeting_transcript(date_str="2024-03-01", dry_run=False)
+
+    # Assert file exists with correct name and content
+    expected_filename = "2024-03-01_team_sync.md"
+    output_file = Path(temp_dir) / expected_filename
+    assert output_file.exists()
+    assert output_file.read_text() == sample_summary
+
+
+def test_process_meeting_transcript_dry_run_prints(meeting_service, capsys, monkeypatch):
+    """Test processing meeting transcript in dry-run prints summary without writing."""
+    sample_summary = "# [Team Sync]\nThis is a summary."
+    import services.meeting_service as ms
+    monkeypatch.setattr(ms.pyperclip, "paste", lambda: "dummy transcript")
+    meeting_service.openai_service.generate_text = Mock(return_value=sample_summary)
+
+    # Execute in dry-run mode
+    meeting_service.process_meeting_transcript(date_str="2024-03-02", dry_run=True)
+    captured = capsys.readouterr()
+    assert sample_summary in captured.out
+
+    # Confirm no file created in output directory
+    out_dir = Path(meeting_service.config["meeting_notes_output_dir"])
+    assert not any(out_dir.iterdir())
+
+
+def test_process_meeting_transcript_with_custom_prompt(meeting_service, temp_dir, monkeypatch, tmp_path):
+    """Test processing meeting transcript with a custom prompt file."""
+    # Create a custom prompt file
+    custom_prompt = "# Custom Prompt Template"
+    custom_prompt_file = tmp_path / "custom_prompt.md"
+    custom_prompt_file.write_text(custom_prompt)
+
+    # Monkey-patch clipboard paste
+    import services.meeting_service as ms
+    monkeypatch.setattr(ms.pyperclip, "paste", lambda: "dummy transcript")
+
+    # Monkey-patch the LLM call
+    expected_prompt = f"{custom_prompt}\n\n'''TRANSCRIPT'''\ndummy transcript"
+
+    def check_prompt(prompt):
+        assert prompt == expected_prompt
+        return "# [Custom Meeting]\nSummary from custom prompt."
+
+    meeting_service.openai_service.generate_text = Mock(side_effect=check_prompt)
+
+    # Execute with custom prompt file
+    meeting_service.process_meeting_transcript(
+        date_str="2024-03-01",
+        dry_run=False,
+        prompt_file=str(custom_prompt_file)
+    )
+
+    # Assert correct prompt was used
+    meeting_service.openai_service.generate_text.assert_called_once()
+
+    # Assert file was created with correct content
+    expected_filename = "2024-03-01_custom_meeting.md"
+    output_file = Path(temp_dir) / expected_filename
+    assert output_file.exists()
+    assert "Summary from custom prompt" in output_file.read_text()

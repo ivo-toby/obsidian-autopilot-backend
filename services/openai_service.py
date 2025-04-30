@@ -373,3 +373,15 @@ Journal entries:\n{notes}"""
                 print(f"Error parsing meeting notes: {e}")
                 return None
         return None
+
+    def generate_text(self, prompt: str) -> str:
+        """Generate raw text from the given prompt."""
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            print(f"Error generating text: {e}")
+            return ""
