@@ -183,6 +183,8 @@ def test_process_meeting_transcript_writes_file(meeting_service, temp_dir, monke
     monkeypatch.setattr(ms.pyperclip, "paste", lambda: "dummy transcript")
     # Monkey-patch the LLM call
     meeting_service.openai_service.generate_text = Mock(return_value=sample_summary)
+    # Mock the topic inference to return a known value
+    meeting_service._infer_topic_from_summary = Mock(return_value="team_sync")
 
     # Execute
     meeting_service.process_meeting_transcript(date_str="2024-03-01", dry_run=False)
@@ -200,6 +202,8 @@ def test_process_meeting_transcript_dry_run_prints(meeting_service, capsys, monk
     import services.meeting_service as ms
     monkeypatch.setattr(ms.pyperclip, "paste", lambda: "dummy transcript")
     meeting_service.openai_service.generate_text = Mock(return_value=sample_summary)
+    # Mock the topic inference to return a known value
+    meeting_service._infer_topic_from_summary = Mock(return_value="team_sync")
 
     # Execute in dry-run mode
     meeting_service.process_meeting_transcript(date_str="2024-03-02", dry_run=True)
@@ -231,6 +235,9 @@ def test_process_meeting_transcript_with_custom_prompt(meeting_service, temp_dir
 
     meeting_service.openai_service.generate_text = Mock(side_effect=check_prompt)
 
+    # Mock the topic inference to return a known value
+    meeting_service._infer_topic_from_summary = Mock(return_value="custom_meeting")
+
     # Execute with custom prompt file
     meeting_service.process_meeting_transcript(
         date_str="2024-03-01",
@@ -246,3 +253,48 @@ def test_process_meeting_transcript_with_custom_prompt(meeting_service, temp_dir
     output_file = Path(temp_dir) / expected_filename
     assert output_file.exists()
     assert "Summary from custom prompt" in output_file.read_text()
+
+
+def test_infer_topic_from_summary(meeting_service):
+    """Test inferring topic from a meeting summary."""
+    # Test with a proper markdown heading
+    summary_with_heading = "# [Team Sync]\nThis is a team sync meeting summary."
+    meeting_service.openai_service.generate_text = Mock(return_value="Team Collaboration Discussion")
+
+    topic = meeting_service._infer_topic_from_summary(summary_with_heading)
+    assert topic == "team_collaboration_discussion"
+
+    # Test fallback when LLM fails
+    meeting_service.openai_service.generate_text = Mock(side_effect=Exception("API error"))
+    topic = meeting_service._infer_topic_from_summary(summary_with_heading)
+    assert topic == "team_sync"
+
+    # Test with no markdown heading
+    summary_without_heading = "This is a meeting summary without a proper heading."
+    meeting_service.openai_service.generate_text = Mock(return_value="Project Status Update")
+
+    topic = meeting_service._infer_topic_from_summary(summary_without_heading)
+    assert topic == "project_status_update"
+
+    # Test fallback to default when no heading and LLM fails
+    meeting_service.openai_service.generate_text = Mock(side_effect=Exception("API error"))
+    topic = meeting_service._infer_topic_from_summary(summary_without_heading)
+    assert topic == "meeting"
+
+
+def test_save_raw_summary_with_inferred_topic(meeting_service, temp_dir):
+    """Test saving raw summary with an inferred topic."""
+    sample_summary = "# [General Discussion]\nThis is a detailed project planning meeting."
+    date_str = "2024-03-01"
+
+    # Mock the infer_topic method to return a custom topic
+    meeting_service._infer_topic_from_summary = Mock(return_value="project_planning_session")
+
+    # Execute
+    meeting_service._save_raw_summary(sample_summary, date_str)
+
+    # Assert file exists with correct name using the inferred topic
+    expected_filename = "2024-03-01_project_planning_session.md"
+    output_file = Path(temp_dir) / expected_filename
+    assert output_file.exists()
+    assert output_file.read_text() == sample_summary

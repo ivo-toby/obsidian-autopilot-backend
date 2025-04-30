@@ -34,7 +34,8 @@ This will:
 
 - Take the transcript from your clipboard
 - Process it with the meeting notes prompt
-- Save a formatted summary to your configured meeting notes directory
+- Intelligently infer a descriptive topic name from the content
+- Save a formatted summary to your configured meeting notes directory with filename `YYYY-MM-DD_inferred_topic.md`
 
 You can also specify a custom prompt file:
 

@@ -102,6 +102,46 @@ class MeetingService:
         else:
             self._save_raw_summary(summary_text, date_str)
 
+    def _infer_topic_from_summary(self, summary_text: str) -> str:
+        """
+        Infer a descriptive topic name from the full meeting summary.
+
+        Uses the LLM to generate a concise topic suitable for a filename.
+        Falls back to extracting from the heading if LLM inference fails.
+
+        Args:
+            summary_text (str): The full meeting summary text
+
+        Returns:
+            str: A descriptive topic name (lowercased with underscores)
+        """
+        # First try to extract from heading as a fallback
+        match = re.match(r"#\s*\[(.*?)\]", summary_text)
+        extracted_topic = match.group(1).strip() if match else "meeting"
+
+        try:
+            # Ask the LLM to infer a better topic name
+            prompt = f"""Based on the following meeting summary, create a short, descriptive topic name (3-5 words maximum):
+
+{summary_text}
+
+Return ONLY the topic name, nothing else. This will be used as a filename."""
+
+            inferred_topic = self.openai_service.generate_text(prompt).strip()
+
+            # Clean up the inferred topic - remove any markdown, quotes, etc.
+            inferred_topic = re.sub(r'[^\w\s-]', '', inferred_topic)
+            inferred_topic = inferred_topic.strip()
+
+            # If we got something reasonable, use it; otherwise fall back to extracted topic
+            if inferred_topic and len(inferred_topic) > 2 and len(inferred_topic) < 50:
+                return inferred_topic.replace(" ", "_").lower()
+            else:
+                return extracted_topic.replace(" ", "_").lower()
+        except Exception as e:
+            print(f"Error inferring topic: {e}")
+            return extracted_topic.replace(" ", "_").lower()
+
     def _save_raw_summary(
         self, summary_text: str, date_str: Optional[str] = None
     ) -> None:
@@ -109,11 +149,10 @@ class MeetingService:
         Save raw summary markdown text using configured output directory and naming.
         """
         ds = date_str or datetime.now().strftime("%Y-%m-%d")
-        # Extract topic from first markdown heading
-        match = re.match(r"#\s*\[(.*?)\]", summary_text)
-        topic = (
-            match.group(1).strip().replace(" ", "_").lower() if match else "meeting"
-        )
+
+        # Infer a descriptive topic from the summary
+        topic = self._infer_topic_from_summary(summary_text)
+
         filename = f"{ds}_{topic}.md"
         outdir = create_output_dir(
             os.path.expanduser(self.config["meeting_notes_output_dir"])
