@@ -86,7 +86,7 @@ def test_init_summary_service(sample_config):
         assert service.config == sample_config
         assert service.notes_service is not None
         assert service.openai_service is not None
-        mock_openai.assert_called_once_with(api_key="test-api-key")
+        mock_openai.assert_called_once_with(api_key="test-api-key", base_url=None)
 
 
 def test_get_all_notes(summary_service, sample_notes_structure):

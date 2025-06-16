@@ -28,7 +28,7 @@ class SummaryService:
         self.config = config
         self.notes_service = NotesService(config["daily_notes_file"])
         self.openai_service = OpenAIService(
-            api_key=config["api_key"], model=config["model"]
+            api_key=config["api_key"], model=config["model"], base_url=config.get("base_url")
         )
 
     def get_all_notes(self) -> List[Dict[str, str]]:

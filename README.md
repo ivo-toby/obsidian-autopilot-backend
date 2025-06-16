@@ -14,11 +14,17 @@ A Python tool for processing and enriching your Obsidian notes, providing automa
   - Extract learnings with auto-generated tags
 
 - **Knowledge Base**
+
   - Build semantic connections between notes
   - Support for OpenAI or local Ollama embeddings
   - Auto-generate wiki-style links
   - Create backlinks automatically
   - Visualize note connections in graph format
+
+- **Flexible AI Backend**
+  - OpenAI API support for text generation and embeddings
+  - Ollama support for local AI processing (both text generation and embeddings)
+  - Configurable base URLs for OpenAI-compatible APIs
 
 ## Meeting Transcripts from Clipboard
 
@@ -80,6 +86,45 @@ python main.py notes --from-clipboard --prompt-file /path/to/custom_prompt.md
    cp config.template.yaml config.yaml
    # Edit config.yaml with your settings
    ```
+
+## Ollama Setup (Local AI Processing)
+
+For complete local AI processing without external API calls:
+
+1. **Install Ollama**: Follow instructions at [ollama.ai](https://ollama.ai)
+
+2. **Pull required models**:
+
+   ```bash
+   # For text generation (summaries, meeting notes, etc.)
+   ollama pull llama3.2
+
+   # For embeddings (knowledge base)
+   ollama pull mxbai-embed-large
+   ```
+
+3. **Configure for Ollama**:
+
+   ```yaml
+   # Text generation settings
+   api_key: "dummy" # Ollama doesn't require a real API key
+   model: "llama3.2" # or llama3.1, codellama, etc.
+   base_url: "http://localhost:11434/v1"
+
+   # Embedding settings
+   embeddings:
+     model_type: "ollama"
+     model_name: "mxbai-embed-large"
+     ollama_config:
+       base_url: "http://localhost:11434"
+   ```
+
+4. **Start Ollama service**:
+   ```bash
+   ollama serve
+   ```
+
+This setup provides complete privacy and offline functionality for all AI operations.
 
 ## CLI Reference
 
@@ -250,9 +295,15 @@ meeting_notes_output_dir: "~/Documents/notes/meetingnotes"
 learnings_file: "~/Documents/notes/learnings/learnings.md"
 learnings_output_dir: "~/Documents/notes/learnings"
 
-# OpenAI settings (if using OpenAI embeddings)
+# OpenAI settings (for text generation)
 api_key: "your-api-key"
 model: "gpt-4o"
+base_url: "https://api.openai.com/v1" # Optional: defaults to OpenAI API
+
+# Alternative: Use Ollama for text generation
+# api_key: "dummy"  # Ollama doesn't require a real API key
+# model: "llama3.2"  # or any model you have in Ollama
+# base_url: "http://localhost:11434/v1"
 
 # Embedding configuration (recommended local setup)
 embeddings:
