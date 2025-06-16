@@ -28,7 +28,7 @@ class MeetingService:
         self.config = config
         self.notes_service = NotesService(config["daily_notes_file"])
         self.openai_service = OpenAIService(
-            api_key=config["api_key"], model=config["model"]
+            api_key=config["api_key"], model=config["model"], base_url=config.get("base_url")
         )
 
     def process_meeting_notes(

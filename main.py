@@ -70,7 +70,7 @@ def process_new_learnings(cfg, cli_args):
         cfg["learnings_file"], cfg["learnings_output_dir"]
     )
     learning_service.process_new_learnings(
-        OpenAIService(api_key=cfg["api_key"], model=cfg["model"])
+        OpenAIService(api_key=cfg["api_key"], model=cfg["model"], base_url=cfg.get("base_url"))
     )
 
 

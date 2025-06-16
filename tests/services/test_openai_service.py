@@ -28,7 +28,7 @@ def mock_openai_client():
 @pytest.fixture
 def openai_service(mock_openai_client):
     """Create an OpenAIService instance with mocked client."""
-    return OpenAIService(api_key="test-key", model="test-model")
+    return OpenAIService(api_key="test-key", model="test-model", base_url=None)
 
 
 @pytest.fixture
@@ -56,9 +56,9 @@ def sample_chat_response():
 def test_init_openai_service():
     """Test OpenAI service initialization."""
     with patch("services.openai_service.OpenAI") as mock_openai:
-        service = OpenAIService(api_key="test-key", model="test-model")
+        service = OpenAIService(api_key="test-key", model="test-model", base_url="http://localhost:11434/v1")
         assert service.model == "test-model"
-        mock_openai.assert_called_once_with(api_key="test-key")
+        mock_openai.assert_called_once_with(api_key="test-key", base_url="http://localhost:11434/v1")
 
 
 def test_generate_learning_title_success(openai_service, mock_openai_client, sample_chat_response):

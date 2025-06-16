@@ -20,16 +20,17 @@ class OpenAIService:
     various text generation and processing tasks.
     """
 
-    def __init__(self, api_key: str, model: str = "gpt-4o-mini"):
+    def __init__(self, api_key: str, model: str = "gpt-4o-mini", base_url: Optional[str] = None):
         """
         Initialize the OpenAI service.
 
         Args:
             api_key (str): OpenAI API key
             model (str, optional): Model to use for completions. Defaults to "gpt-4o-mini"
+            base_url (str, optional): Base URL for the API. Defaults to None (uses OpenAI default)
         """
         self.model = model
-        self.client = OpenAI(api_key=api_key)
+        self.client = OpenAI(api_key=api_key, base_url=base_url)
 
     def generate_learning_title(self, learning: str) -> str:
         """
