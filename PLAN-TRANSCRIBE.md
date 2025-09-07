@@ -1,62 +1,84 @@
 ## Goal
 
-Add a meetingnotes.record() feature that:
-(1) records app audio (Zoom, Discord, Teams, Slack),
-(2) transcribes with OpenAI Whisper, Parakeet,
-(3) summarizes using existing meetingnotes function,
-(4) deletes audio immediately after summarization
+Add a `notes --record-audio` capability, delivered in phases:
 
-Default to local, per-app capture via ScreenCaptureKit; offer Zoom Cloud mode if hosts enable cloud recordings.
+1. Record macOS app audio to WAV (no deletion yet).
+2. Local transcription with Parakeet.
+3. Add a transcriber abstraction to support Parakeet and OpenAI Whisper.
+4. Enable secure deletion of audio and wire end‑to‑end summarization.
+
+Default to local, per‑app capture via ScreenCaptureKit on macOS. Zoom Cloud/webhooks are deferred.
+
+Alignment with current architecture
+• Keep changes inside `services/` and reuse existing `utils/cli.py`, `services/meeting_service.py`, and `services/openai_service.py`.
+• Orchestration belongs in a new `services/transcription_service.py` rather than a top‑level `pipelines/`.
+• Summarization continues to use `OpenAIService` and `MeetingService` (no new `summarize/` package).
 
 Architecture
-• capture/
-• sckit.py — per-app audio capture via ScreenCaptureKit (PyObjC). ￼
-• fallback_ffmpeg.py — optional ffmpeg+BlackHole path for macOS < 13.
-• zoom_cloud.py — webhook handler to fetch/delete cloud recording. ￼ ￼
-• asr/parakeet.py — batch transcribe (Parakeet TDT 0.6B v2 via NeMo/HF). ￼ ￼
-• summarize/llm.py — runs your existing LLM stack to produce action items/decisions.
-• pipelines/record_transcribe_summarize.py — orchestrates capture → ASR → summary → secure delete.
-• cli.py — adds autopilot meetingnotes record --app zoom|rekordbox [--cloud] [--stop-key q].
+• services/audio_capture.py — per‑app audio capture via ScreenCaptureKit (PyObjC).
+• services/transcription_service.py — orchestrates capture → ASR (and later delete).
+• services/transcribers/parakeet.py — local Parakeet TDT 0.6B v2 via NeMo/HF.
+• services/transcribers/openai_whisper.py — OpenAI Whisper (optional backend).
+• services/meeting_service.py — reuse to save summaries and filenames.
+• utils/cli.py — extend existing `notes` subcommand with recording/transcribe flags.
 
 UX & Modes
-• Local (default): --app zoom captures Zoom.app audio; --app rekordbox captures Rekordbox audio.
-• Stop conditions: keypress (q), silence N seconds, or SIGINT.
-• Ephemeral storage: write WAV to tempfile then unlink after ASR; optionally RAM disk is supported but not required.
-• Cloud mode (optional): auto-download M4A on recording.completed, transcribe, then call Delete meeting recordings API with action=trash or permanent delete as configured. ￼ ￼ ￼
+• CLI (extend notes):
+
+- `notes --record-audio [--app zoom|teams|slack|discord] [--stop-key q] [--silence-stop N]`
+- `notes --audio-file /path/to.wav` (transcribe existing file)
+  • Phase 1 saves WAV locally (no deletion).
+  • Stop conditions: keypress (q), optional silence gate, or SIGINT.
+  • Cloud mode (Zoom) is deferred to a later phase.
 
 Permissions & Platform
-• macOS 13+: ScreenCaptureKit supports per-app audio capture; set SCStreamConfiguration.capturesAudio = true. First run will prompt for Screen Recording permission (TCC). ￼
-• Proof it works: OBS’s “macOS Screen Capture” does per-app audio on Ventura+ via ScreenCaptureKit (no drivers). ￼ ￼
-• PyObjC bindings: pyobjc-framework-ScreenCaptureKit (current on PyPI). ￼
+• macOS 13+: ScreenCaptureKit supports per‑app audio capture; set SCStreamConfiguration.capturesAudio = true. First run will prompt for Screen Recording permission (TCC).
+• OBS’s “macOS Screen Capture” does per‑app audio on Ventura+ via ScreenCaptureKit (no drivers).
+• PyObjC bindings: pyobjc-framework-ScreenCaptureKit (current on PyPI).
 
-Implementation Steps (local capture) 1. Deps
-• pip install pyobjc-core pyobjc-framework-ScreenCaptureKit pyobjc-framework-AVFAudio numpy soundfile
-• Your ASR deps (nemo*toolkit, torch) and LLM client. 2. Enumerate capturable apps
-• SCShareableContent.getShareableContentWithCompletionHandler* → pick app by bundle id (us.zoom.xos, com.pioneerdj.rekordbox). ￼ 3. Configure stream
-• SCStreamConfiguration: capturesAudio=True, sample rate 48000, 1ch for Zoom, 2ch for Rekordbox; format PCM 16-bit.
-• SCContentFilter with the selected SCApplication. 4. Receive audio buffers
-• Implement SCStreamOutput (PyObjC) to get CMSampleBufferRef; extract AudioBufferList → numpy → write to wav using AVAudioFile/soundfile. ￼ 5. Stop logic
-• A small stdin reader that watches for q\n, or a silence gate (RMS < threshold for N sec). 6. Transcribe
-• Load nvidia/parakeet-tdt-0.6b-v2; downmix/resample to 16 kHz mono for Zoom; keep stereo for Rekordbox if you want DJ set analysis then sum to mono for ASR. ￼ 7. Summarize
-• Feed transcript to your existing meetingnotes summarizer; produce decisions, actions, topics. 8. Shred
-• os.remove(wav_path) immediately after ASR finishes and transcript is persisted to your notes graph.
+Implementation Steps (phased)
+Phase 1 — Audio capture (macOS)
+
+1. Deps: `pyobjc-core`, `pyobjc-framework-ScreenCaptureKit`, `pyobjc-framework-AVFAudio`, `numpy`, `soundfile`.
+2. Enumerate capturable apps with `SCShareableContent.shareableContent()`, pick by bundle id (e.g., `us.zoom.xos`).
+3. Configure stream: `SCStreamConfiguration.capturesAudio=True`, sample rate 48000, PCM 16‑bit; `SCContentFilter` with selected `SCApplication`.
+4. Receive audio buffers: implement `SCStreamOutput` to get `CMSampleBufferRef`; extract `AudioBufferList` → `numpy` → write to WAV via `soundfile`.
+5. Stop logic: stdin reader for `q`, optional silence gate (RMS < threshold for N sec), SIGINT.
+6. CLI: `notes --record-audio --app zoom` writes WAV to an output directory; no deletion.
+
+Phase 2 — Local ASR (Parakeet)
+
+1. Deps: `torch`, `nemo_toolkit` (ASR), model `nvidia/parakeet-tdt-0.6b-v2`.
+2. Implement `services/transcribers/parakeet.py` with `transcribe(path:str)->str` (lazy import heavy deps).
+3. CLI: `notes --audio-file /path/to.wav` routes to Parakeet and prints/saves transcript.
+
+Phase 3 — Transcriber abstraction
+
+1. Define `Transcriber` interface in `services/transcription_service.py` and register backends.
+2. Add `services/transcribers/openai_whisper.py` as the cloud backend.
+3. Config: `transcription.provider: parakeet|openai`.
+
+Phase 4 — End‑to‑end + deletion
+
+1. Orchestrate capture → transcribe → summarize via existing `MeetingService`.
+2. Enable secure deletion of WAV only after summary is written; toggle via config.
 
 Swift alternative (optional)
 
 If PyObjC event loops get fussy, ship a 200-line Swift helper (sckit-capture) that writes WAV to stdout; spawn it from Python and read a stream until stop. Same API calls (SCStream, SCContentFilter). This keeps the Python side simple and avoids GIL/RunLoop juggling. ￼
 
-Zoom Cloud mode (optional)
-• Webhook: subscribe to recording.completed. Payload includes download token/URLs. Download M4A → ASR → summary → DELETE /meetings/{meetingId}/recordings?action=trash. Document the permanent-delete toggle. ￼ ￼ ￼
+Zoom Cloud mode (deferred, optional)
+• Webhook: subscribe to recording.completed. Payload includes download token/URLs. Download M4A → ASR → summary → DELETE /meetings/{meetingId}/recordings?action=trash. Document the permanent-delete toggle.
 
 CLI sketch
 
-autopilot meetingnotes record --app zoom --stop-key q
-autopilot meetingnotes record --app rekordbox --silence-stop 8
-autopilot meetingnotes record --cloud --meeting-id 123456789
+python main.py notes --record-audio --app zoom --stop-key q
+python main.py notes --audio-file /path/to.wav
+python main.py notes --record-audio --silence-stop 8
 
 Python skeletons (key bits)
 
-# capture/sckit.py
+# services/audio_capture.py
 
 from Cocoa import NSObject, NSLog
 import ScreenCaptureKit as SCK
@@ -83,18 +105,18 @@ sink = AudioSink.alloc().initWithPath*(out*wav)
 stream.addStreamOutput_type_minimumFrameTime_error*(sink, SCK.SCStreamOutputTypeAudio, CM.CMTimeMake(1,10), None)
 stream.startCaptureWithCompletionHandler\_(lambda err: NSLog("capturing")) # block until stop key; then stop and teardown
 
-# asr/parakeet.py
+# services/transcribers/parakeet.py
 
 from nemo.collections.asr import models
 def transcribe(path:str)->str:
 m = models.ASRModel.from_pretrained("nvidia/parakeet-tdt-0.6b-v2")
 return m.transcribe([path], batch_size=1, return_hypotheses=False)[0]
 
-Acceptance criteria
-• autopilot meetingnotes record --app zoom produces a transcript + summary and deletes the WAV within 2 seconds of finishing.
-• Works on macOS 13+ with only Screen Recording permission; no third-party audio drivers.
-• Optional: --cloud path downloads M4A after webhook, then deletes the cloud recording via API.
-• Rekordbox capture preserves stereo to file; ASR handles mono resample internally.
+Acceptance criteria (per phase)
+• Phase 1: `notes --record-audio --app zoom` writes a valid WAV from app audio on macOS 13+.
+• Phase 2: `notes --audio-file file.wav` returns a transcript using Parakeet locally.
+• Phase 3: Config switch selects Parakeet or OpenAI Whisper; both paths work on the same input.
+• Phase 4: End‑to‑end: record → transcribe → summarize; audio deletion happens after successful write.
 
 Edge cases
 • No audio device / app not running: fail fast with actionable error.
