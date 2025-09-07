@@ -6,3 +6,11 @@ chromadb==0.4.24
 tqdm==4.66.2
 numpy<2.0.0  # Pin numpy to version before 2.0
 pyperclip==1.8.2
+
+# Optional (for local Parakeet transcription in Phase 2)
+soundfile==0.13.1
+librosa==0.11.0
+resampy==0.4.3
+# Install these separately due to platform-specific wheels:
+#   pip install torch torchvision torchaudio
+#   pip install 'nemo_toolkit[asr]'

@@ -22,6 +22,7 @@ from services.audio_capture import AudioCaptureService, default_output_wav_path
 from services.vector_store import ChunkingService, EmbeddingService, VectorStoreService
 from utils.cli import setup_argparser
 from utils.config_loader import load_config
+from services.transcribers import parakeet as parakeet_transcriber
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -408,7 +409,26 @@ if __name__ == "__main__":
     logging.getLogger("services.vector_store.store_service").setLevel(logging.DEBUG)
 
     if args.command == "notes":
-        if getattr(args, "record_audio", False):
+        if getattr(args, "audio_file", None):
+            # Phase 2: transcribe existing audio file using Parakeet
+            audio_path = os.path.expanduser(args.audio_file)
+            if not os.path.isfile(audio_path):
+                logger.error(f"Audio file not found: {audio_path}")
+                sys.exit(1)
+            print("Transcribing with Parakeet...")
+            transcript = parakeet_transcriber.transcribe(audio_path)
+            if cfg.get("logging", {}).get("level", "INFO").upper() == "DEBUG":
+                print("\n--- Transcript ---\n")
+                print(transcript)
+            # Save transcript using MeetingService path (raw summary style)
+            meeting_service = MeetingService(cfg)
+            if transcript.strip():
+                meeting_service._save_raw_summary(transcript)  # type: ignore[attr-defined]
+                print("Saved transcript summary to meeting notes output dir.")
+            else:
+                print("Empty transcript.")
+            sys.exit(0)
+        elif getattr(args, "record_audio", False):
             # Phase 1: record macOS app audio to WAV
             if not args.app:
                 logger.error("--app is required when using --record-audio")

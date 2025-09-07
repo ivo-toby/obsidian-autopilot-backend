@@ -134,6 +134,30 @@ Troubleshooting:
 - If no files appear, ensure you pressed `q` then Enter to stop, which finalizes the WAV.
 - If sound is distorted, rebuild the helper with the command above and try again.
 
+## Local transcription (Parakeet) — optional
+
+To enable local ASR with NVIDIA NeMo Parakeet for `--audio-file`:
+
+1. Install Python deps (in your venv):
+
+```bash
+pip install --upgrade pip
+pip install soundfile librosa resampy
+pip install torch torchvision torchaudio
+pip install 'nemo_toolkit[asr]'
+```
+
+2. Transcribe a WAV:
+
+```bash
+python main.py notes --audio-file ./recordings/your.wav
+```
+
+Notes:
+
+- Capture runs at 48 kHz; the transcriber downsamples to 16 kHz mono before ASR.
+- NeMo wheels can be large; installation may take a few minutes.
+
 ## Ollama Setup (Local AI Processing)
 
 For complete local AI processing without external API calls:

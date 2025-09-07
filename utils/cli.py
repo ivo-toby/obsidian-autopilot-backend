@@ -85,6 +85,11 @@ def setup_argparser() -> argparse.ArgumentParser:
         help="Output WAV path (defaults to ~/Downloads/meeting_audio_YYYYMMDD_HHMMSS.wav)",
     )
     notes_parser.add_argument(
+        "--audio-file",
+        type=str,
+        help="Transcribe an existing audio file (skips recording)",
+    )
+    notes_parser.add_argument(
         "--prompt-file",
         type=str,
         help="Path to a custom prompt file for the meeting transcript feature"
