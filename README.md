@@ -87,6 +87,53 @@ python main.py notes --from-clipboard --prompt-file /path/to/custom_prompt.md
    # Edit config.yaml with your settings
    ```
 
+## Build macOS audio capture helper (sckit-capture)
+
+This project uses a tiny Swift helper to capture per‑app audio on macOS via ScreenCaptureKit.
+
+Prerequisites:
+
+- macOS 13 or newer
+- Xcode Command Line Tools (run once):
+
+  ```bash
+  xcode-select --install
+  ```
+
+Build (one‑liner):
+
+```bash
+cd swift
+xcrun swiftc -parse-as-library -O -o sckit-capture sckit-capture.swift
+```
+
+Configure recording defaults (already present in `config.yaml`):
+
+```yaml
+recording:
+  output_dir: "./recordings" # where WAV files are written
+  segment_seconds: 3600 # rotate every 60 minutes
+  sample_rate: 16000 # used later for ASR; capture runs at 48 kHz
+  channels: 1 # mono output
+```
+
+Record audio (example with Zoom):
+
+```bash
+python main.py notes --record-audio --app zoom
+# press q + Enter to stop; files appear in ./recordings
+```
+
+First run will prompt for Screen Recording permission:
+
+- System Settings → Privacy & Security → Screen Recording → enable for your terminal
+
+Troubleshooting:
+
+- If you see "Audio capture failed" and you built the helper, ensure it exists at `swift/sckit-capture` or is on your `PATH`.
+- If no files appear, ensure you pressed `q` then Enter to stop, which finalizes the WAV.
+- If sound is distorted, rebuild the helper with the command above and try again.
+
 ## Ollama Setup (Local AI Processing)
 
 For complete local AI processing without external API calls:
