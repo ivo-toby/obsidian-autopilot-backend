@@ -4,3 +4,6 @@ __pycache__/
 .aider.*
 .aider*
 .coverage*
+recordings/
+swift/sckit-capture
+swift/sckit-capture.dSYM/

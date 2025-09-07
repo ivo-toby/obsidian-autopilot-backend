@@ -63,6 +63,28 @@ def setup_argparser() -> argparse.ArgumentParser:
         help="Read a full meeting transcript from the system clipboard instead of daily notes"
     )
     notes_parser.add_argument(
+        "--record-audio",
+        action="store_true",
+        help="Record application audio to a WAV file (macOS ScreenCaptureKit)",
+    )
+    notes_parser.add_argument(
+        "--app",
+        type=str,
+        choices=["zoom", "teams", "slack", "discord", "rekordbox"],
+        help="Application to capture audio from (macOS only)",
+    )
+    notes_parser.add_argument(
+        "--stop-key",
+        type=str,
+        default="q",
+        help="Key to stop recording (press key then Enter)",
+    )
+    notes_parser.add_argument(
+        "--audio-out",
+        type=str,
+        help="Output WAV path (defaults to ~/Downloads/meeting_audio_YYYYMMDD_HHMMSS.wav)",
+    )
+    notes_parser.add_argument(
         "--prompt-file",
         type=str,
         help="Path to a custom prompt file for the meeting transcript feature"

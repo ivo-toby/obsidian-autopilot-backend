@@ -18,6 +18,7 @@ from services.learning_service import LearningService
 from services.meeting_service import MeetingService
 from services.openai_service import OpenAIService
 from services.summary_service import SummaryService
+from services.audio_capture import AudioCaptureService, default_output_wav_path
 from services.vector_store import ChunkingService, EmbeddingService, VectorStoreService
 from utils.cli import setup_argparser
 from utils.config_loader import load_config
@@ -407,7 +408,35 @@ if __name__ == "__main__":
     logging.getLogger("services.vector_store.store_service").setLevel(logging.DEBUG)
 
     if args.command == "notes":
-        if args.from_clipboard:
+        if getattr(args, "record_audio", False):
+            # Phase 1: record macOS app audio to WAV
+            if not args.app:
+                logger.error("--app is required when using --record-audio")
+                sys.exit(1)
+            # Derive defaults from config
+            rec_cfg = cfg.get("recording", {})
+            base_dir = os.path.abspath(os.path.expanduser(rec_cfg.get("output_dir", "./recordings")))
+            os.makedirs(base_dir, exist_ok=True)
+            out_path = args.audio_out or default_output_wav_path(base_dir)
+            seg_seconds = int(rec_cfg.get("segment_seconds", 3600))
+            sample_rate = int(rec_cfg.get("sample_rate", 16000))
+            channels = int(rec_cfg.get("channels", 1))
+            try:
+                svc = AudioCaptureService()
+                wav_path = svc.record_app_audio(
+                    app_key=args.app,
+                    output_wav_path=out_path,
+                    stop_key=args.stop_key or "q",
+                    silence_stop_seconds=seg_seconds,
+                    sample_rate=sample_rate,
+                    channels=channels,
+                )
+                print(f"\nSaved recording to: {wav_path}")
+            except Exception as e:
+                logger.error(f"Audio capture failed: {str(e)}")
+                sys.exit(1)
+            sys.exit(0)
+        elif args.from_clipboard:
             process_meeting_notes(cfg, args)
             sys.exit(0)
         elif args.process_learnings:
