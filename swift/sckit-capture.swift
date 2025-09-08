@@ -6,6 +6,8 @@ import Foundation
 import ScreenCaptureKit
 import CoreMedia
 import AudioToolbox
+import AVFoundation
+import CoreAudio
 
 // MARK: - WAV Writer
 
@@ -78,6 +80,135 @@ final class WAVWriter {
     private func uint32(_ v: UInt32) -> Data { withUnsafeBytes(of: v.littleEndian) { Data($0) } }
 }
 
+// MARK: - Mic ring buffer and capture
+
+final class MicRingBuffer {
+    private let q = DispatchQueue(label: "mic.ringbuffer")
+    private var data = Data()
+    private let maxBytes: Int
+
+    init(capacitySeconds: Int, sampleRate: Int, channels: Int) {
+        self.maxBytes = max(1, capacitySeconds) * sampleRate * max(1, channels) * 2
+    }
+
+    func write(_ chunk: Data) {
+        q.async {
+            self.data.append(chunk)
+            if self.data.count > self.maxBytes {
+                let drop = self.data.count - self.maxBytes
+                self.data.removeFirst(drop)
+            }
+        }
+    }
+
+    func readBytes(count: Int) -> Data {
+        q.sync {
+            if self.data.count >= count {
+                let out = self.data.prefix(count)
+                self.data.removeFirst(count)
+                return Data(out)
+            } else {
+                let available = self.data
+                self.data.removeAll(keepingCapacity: true)
+                if available.count < count {
+                    var out = Data(available)
+                    out.append(Data(count: count - available.count))
+                    return out
+                }
+                return available
+            }
+        }
+    }
+}
+
+final class MicCapture {
+    let buffer: MicRingBuffer
+    private let engine = AVAudioEngine()
+    private let sampleRate: Int
+    private let channels: Int
+    private var addr: AudioObjectPropertyAddress?
+    private var audioPropertyListenerBlock: AudioObjectPropertyListenerBlock?
+    private let audioPropertyQueue = DispatchQueue.main
+
+    init(sampleRate: Int, channels: Int) {
+        self.sampleRate = sampleRate
+        self.channels = max(1, channels)
+        self.buffer = MicRingBuffer(capacitySeconds: 5, sampleRate: sampleRate, channels: self.channels)
+    }
+
+    func start() throws {
+        try configureTapAndStart()
+        installDefaultInputListener()
+    }
+
+    func stop() {
+        removeDefaultInputListener()
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+    }
+
+    private func restart() {
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+        try? configureTapAndStart()
+    }
+
+    private func configureTapAndStart() throws {
+        let input = engine.inputNode
+        input.removeTap(onBus: 0)
+        input.installTap(onBus: 0, bufferSize: 1024, format: nil) { [weak self] (buf, _) in
+            guard let self = self else { return }
+            guard let chData = buf.floatChannelData else { return }
+            let chCount = Int(buf.format.channelCount)
+            let frames = Int(buf.frameLength)
+            if frames == 0 { return }
+
+            var pcm16 = Data()
+            pcm16.reserveCapacity(frames * self.channels * 2)
+
+            for i in 0..<frames {
+                if self.channels == 1 {
+                    var acc: Float = 0
+                    for c in 0..<max(1, chCount) { acc += chData[c][i] }
+                    let avg = acc / Float(max(1, chCount))
+                    let s = Int16(max(-1.0, min(1.0, avg)) * 32767.0)
+                    pcm16.append(contentsOf: withUnsafeBytes(of: s.littleEndian) { Data($0) })
+                } else {
+                    for c in 0..<self.channels {
+                        let v = chData[min(c, max(1, chCount) - 1)][i]
+                        let s = Int16(max(-1.0, min(1.0, v)) * 32767.0)
+                        pcm16.append(contentsOf: withUnsafeBytes(of: s.littleEndian) { Data($0) })
+                    }
+                }
+            }
+            self.buffer.write(pcm16)
+        }
+        try engine.start()
+    }
+
+    private func installDefaultInputListener() {
+        let a = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        addr = a
+        let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            self?.restart()
+        }
+        audioPropertyListenerBlock = block
+        var addrCopy = a
+        AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &addrCopy, audioPropertyQueue, block)
+    }
+
+    private func removeDefaultInputListener() {
+        guard var a = addr, let block = audioPropertyListenerBlock else { return }
+        AudioObjectRemovePropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &a, audioPropertyQueue, block)
+        addr = nil
+        audioPropertyListenerBlock = nil
+    }
+}
+
 // MARK: - Audio Sink
 
 final class AudioSink: NSObject, SCStreamOutput {
@@ -94,13 +225,15 @@ final class AudioSink: NSObject, SCStreamOutput {
     private var inputIsFloat32: Bool = true
     private var inputIsNonInterleaved: Bool = false
     private var formatInitialized: Bool = false
+    private var micBuffer: MicRingBuffer?
 
 
-    init(outDir: URL, sampleRate: Int, channels: Int, segmentSeconds: Int?) {
+    init(outDir: URL, sampleRate: Int, channels: Int, segmentSeconds: Int?, micBuffer: MicRingBuffer?) {
         self.outDir = outDir
         self.sampleRate = sampleRate
         self.channels = channels
         self.segmentSeconds = segmentSeconds
+        self.micBuffer = micBuffer
     }
 
     private func newFileURL() -> URL {
@@ -133,6 +266,27 @@ final class AudioSink: NSObject, SCStreamOutput {
             w.close()
             writer = nil
         }
+    }
+
+    private func mixWithMic(_ zoomPCM16: Data) -> Data {
+        guard let mic = micBuffer, zoomPCM16.count > 0 else { return zoomPCM16 }
+        let micData = mic.readBytes(count: zoomPCM16.count)
+        var out = Data(count: zoomPCM16.count)
+        out.withUnsafeMutableBytes { (op: UnsafeMutableRawBufferPointer) in
+            zoomPCM16.withUnsafeBytes { (zp: UnsafeRawBufferPointer) in
+                micData.withUnsafeBytes { (mp: UnsafeRawBufferPointer) in
+                    let o = op.bindMemory(to: Int16.self)
+                    let z = zp.bindMemory(to: Int16.self)
+                    let m = mp.bindMemory(to: Int16.self)
+                    let n = zoomPCM16.count / 2
+                    for i in 0..<n {
+                        let sum = (Int(z[i]) + Int(m[i])) / 2
+                        o[i] = Int16(max(-32768, min(32767, sum)))
+                    }
+                }
+            }
+        }
+        return out
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of outputType: SCStreamOutputType) {
@@ -254,7 +408,7 @@ final class AudioSink: NSObject, SCStreamOutput {
                     }
 
                     if !pcm16.isEmpty {
-                        writer?.writePCM(pcm16)
+                        writer?.writePCM(mixWithMic(pcm16))
                         let frameSize = channels * 2
                         if frameSize > 0 { samplesWritten += Int64(pcm16.count / frameSize) }
                     }
@@ -413,7 +567,7 @@ final class AudioSink: NSObject, SCStreamOutput {
         }
 
         if !pcm16.isEmpty {
-            writer?.writePCM(pcm16)
+            writer?.writePCM(mixWithMic(pcm16))
             let frameSize = channels * 2
             if frameSize > 0 { samplesWritten += Int64(pcm16.count / frameSize) }
         }
@@ -544,8 +698,15 @@ struct Runner {
 
             let filter = SCContentFilter(display: display, including: [app], exceptingWindows: [])
             let stream = SCStream(filter: filter, configuration: cfg, delegate: nil)
+            // Mic capture for live mixing; start non-fatally so Zoom capture still works if mic fails
+            let micCapture = MicCapture(sampleRate: 48_000, channels: args.channels)
+            do {
+                try micCapture.start()
+            } catch {
+                fputs("Mic capture unavailable: \(error)\n", stderr)
+            }
             // Align sink's expected sample rate with SC configuration (48k)
-            let sink = AudioSink(outDir: args.outDir, sampleRate: 48_000, channels: args.channels, segmentSeconds: args.segmentSeconds)
+            let sink = AudioSink(outDir: args.outDir, sampleRate: 48_000, channels: args.channels, segmentSeconds: args.segmentSeconds, micBuffer: micCapture.buffer)
 
             do {
                 try stream.addStreamOutput(sink, type: SCStreamOutputType.audio, sampleHandlerQueue: DispatchQueue.main)
@@ -582,6 +743,7 @@ struct Runner {
             }
             // Ensure final WAV header is patched
             sink.closeWriter()
+            micCapture.stop()
             exit(0)
         } catch {
             fputs("Error initializing capture: \(error)\n", stderr)
