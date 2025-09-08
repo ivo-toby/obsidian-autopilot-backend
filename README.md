@@ -134,20 +134,18 @@ Troubleshooting:
 - If no files appear, ensure you pressed `q` then Enter to stop, which finalizes the WAV.
 - If sound is distorted, rebuild the helper with the command above and try again.
 
-## Local transcription (Parakeet) — optional
+## Local transcription (default: faster-whisper)
 
-To enable local ASR with NVIDIA NeMo Parakeet for `--audio-file`:
+To transcribe locally without cloud APIs, we use faster-whisper by default.
 
-1. Install Python deps (in your venv):
+1. Install deps (in your venv):
 
 ```bash
 pip install --upgrade pip
-pip install soundfile librosa resampy
-pip install torch torchvision torchaudio
-pip install 'nemo_toolkit[asr]'
+pip install faster-whisper
 ```
 
-2. Transcribe a WAV:
+2. Transcribe a file:
 
 ```bash
 python main.py notes --audio-file ./recordings/your.wav
@@ -155,8 +153,20 @@ python main.py notes --audio-file ./recordings/your.wav
 
 Notes:
 
-- Capture runs at 48 kHz; the transcriber downsamples to 16 kHz mono before ASR.
-- NeMo wheels can be large; installation may take a few minutes.
+- Works well on Apple Silicon CPU; no GPU required.
+- Supports common formats (wav/m4a/mp3) via ffmpeg.
+
+### Optional: Parakeet (advanced)
+
+If you prefer Parakeet RNNT, install heavy deps:
+
+```bash
+pip install soundfile librosa resampy
+pip install torch torchvision torchaudio
+pip install 'nemo_toolkit[asr]'
+```
+
+Then switch call sites to use Parakeet, or invoke the optional path if added.
 
 ## Ollama Setup (Local AI Processing)
 

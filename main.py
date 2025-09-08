@@ -22,7 +22,7 @@ from services.audio_capture import AudioCaptureService, default_output_wav_path
 from services.vector_store import ChunkingService, EmbeddingService, VectorStoreService
 from utils.cli import setup_argparser
 from utils.config_loader import load_config
-from services.transcribers import parakeet as parakeet_transcriber
+from services.transcribers import faster_whisper as fw_transcriber
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -410,13 +410,13 @@ if __name__ == "__main__":
 
     if args.command == "notes":
         if getattr(args, "audio_file", None):
-            # Phase 2: transcribe existing audio file using Parakeet
+            # Phase 2: transcribe existing audio file (default: faster-whisper)
             audio_path = os.path.expanduser(args.audio_file)
             if not os.path.isfile(audio_path):
                 logger.error(f"Audio file not found: {audio_path}")
                 sys.exit(1)
-            print("Transcribing with Parakeet...")
-            transcript = parakeet_transcriber.transcribe(audio_path)
+            print("Transcribing with faster-whisper...")
+            transcript = fw_transcriber.transcribe(audio_path)
             if cfg.get("logging", {}).get("level", "INFO").upper() == "DEBUG":
                 print("\n--- Transcript ---\n")
                 print(transcript)

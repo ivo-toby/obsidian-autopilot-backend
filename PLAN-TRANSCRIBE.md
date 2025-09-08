@@ -3,8 +3,8 @@
 Add a `notes --record-audio` capability, delivered in phases:
 
 1. Record macOS app audio to WAV (no deletion yet).
-2. Local transcription with Parakeet.
-3. Add a transcriber abstraction to support Parakeet and OpenAI Whisper.
+2. Local transcription with faster-whisper (default).
+3. Add a transcriber abstraction to support faster-whisper, Parakeet, and OpenAI Whisper.
 4. Enable secure deletion of audio and wire end‑to‑end summarization.
 
 Default to local, per‑app capture via ScreenCaptureKit on macOS. Zoom Cloud/webhooks are deferred.
@@ -17,7 +17,8 @@ Alignment with current architecture
 Architecture
 • services/audio_capture.py — per‑app audio capture via ScreenCaptureKit (PyObjC).
 • services/transcription_service.py — orchestrates capture → ASR (and later delete).
-• services/transcribers/parakeet.py — local Parakeet TDT 0.6B v2 via NeMo/HF.
+• services/transcribers/faster_whisper.py — local Whisper (CTranslate2) default backend.
+• services/transcribers/parakeet.py — optional Parakeet TDT 0.6B v2 via NeMo/HF.
 • services/transcribers/openai_whisper.py — OpenAI Whisper (optional backend).
 • services/meeting_service.py — reuse to save summaries and filenames.
 • utils/cli.py — extend existing `notes` subcommand with recording/transcribe flags.
@@ -46,17 +47,17 @@ Phase 1 — Audio capture (macOS)
 5. Stop logic: stdin reader for `q`, optional silence gate (RMS < threshold for N sec), SIGINT.
 6. CLI: `notes --record-audio --app zoom` writes WAV to an output directory; no deletion.
 
-Phase 2 — Local ASR (Parakeet)
+Phase 2 — Local ASR (default: faster-whisper)
 
-1. Deps: `torch`, `nemo_toolkit` (ASR), model `nvidia/parakeet-tdt-0.6b-v2`.
-2. Implement `services/transcribers/parakeet.py` with `transcribe(path:str)->str` (lazy import heavy deps).
-3. CLI: `notes --audio-file /path/to.wav` routes to Parakeet and prints/saves transcript.
+1. Deps: `faster-whisper` (CTranslate2). Optional: `ffmpeg`.
+2. Implement `services/transcribers/faster_whisper.py` with `transcribe(path:str)->str`.
+3. CLI: `notes --audio-file /path/to.wav` routes to faster-whisper and prints/saves transcript.
 
 Phase 3 — Transcriber abstraction
 
 1. Define `Transcriber` interface in `services/transcription_service.py` and register backends.
 2. Add `services/transcribers/openai_whisper.py` as the cloud backend.
-3. Config: `transcription.provider: parakeet|openai`.
+3. Config: `transcription.provider: faster_whisper|parakeet|openai`.
 
 Phase 4 — End‑to‑end + deletion
 
@@ -105,17 +106,21 @@ sink = AudioSink.alloc().initWithPath*(out*wav)
 stream.addStreamOutput_type_minimumFrameTime_error*(sink, SCK.SCStreamOutputTypeAudio, CM.CMTimeMake(1,10), None)
 stream.startCaptureWithCompletionHandler\_(lambda err: NSLog("capturing")) # block until stop key; then stop and teardown
 
-# services/transcribers/parakeet.py
+# services/transcribers/faster_whisper.py
 
-from nemo.collections.asr import models
+from faster_whisper import WhisperModel
 def transcribe(path:str)->str:
-m = models.ASRModel.from_pretrained("nvidia/parakeet-tdt-0.6b-v2")
-return m.transcribe([path], batch_size=1, return_hypotheses=False)[0]
+model = WhisperModel("large-v3", device="auto", compute_type="int8")
+segments, info = model.transcribe(path)
+return "\n".join(s.text for s in segments if s.text)
 
 Acceptance criteria (per phase)
 • Phase 1: `notes --record-audio --app zoom` writes a valid WAV from app audio on macOS 13+.
-• Phase 2: `notes --audio-file file.wav` returns a transcript using Parakeet locally.
-• Phase 3: Config switch selects Parakeet or OpenAI Whisper; both paths work on the same input.
+• Phase 2: `notes --audio-file file.wav` returns a transcript using faster-whisper locally.
+• Phase 3: Config switch selects faster-whisper, Parakeet (optional), or OpenAI Whisper; both paths work on the same input.
+
+Stretch goal
+• Parakeet on MPS via a small Swift helper leveraging Metal; expose as optional backend.
 • Phase 4: End‑to‑end: record → transcribe → summarize; audio deletion happens after successful write.
 
 Edge cases

@@ -11,6 +11,8 @@ pyperclip==1.8.2
 soundfile==0.13.1
 librosa==0.11.0
 resampy==0.4.3
+# Default local ASR (faster-whisper)
+faster-whisper==1.0.3
 # Install these separately due to platform-specific wheels:
 #   pip install torch torchvision torchaudio
 #   pip install 'nemo_toolkit[asr]'
