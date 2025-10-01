@@ -121,7 +121,8 @@ class OllamaProvider(BaseProvider):
 
         Args:
             prompt (str): The input prompt
-            **kwargs: Additional parameters (temperature, etc.)
+            **kwargs: Additional parameters (temperature, reasoning, etc.)
+                reasoning (bool): Override global reasoning setting
 
         Returns:
             str: Generated text response
@@ -129,17 +130,30 @@ class OllamaProvider(BaseProvider):
         try:
             temperature = kwargs.get("temperature", self.temperature)
 
-            response = self.client.chat(
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-                options={
+            # Check if reasoning should be enabled for this request
+            use_reasoning = kwargs.get("reasoning", self.reasoning_enabled)
+            use_reasoning = use_reasoning and self._is_reasoning_model()
+
+            # Build API call parameters
+            api_params = {
+                "model": self.model,
+                "messages": [{"role": "user", "content": prompt}],
+                "options": {
                     "temperature": temperature,
                     "num_ctx": self.num_ctx,
                     "num_thread": self.num_thread,
                 },
-            )
+            }
 
-            return response["message"]["content"]
+            # Add think parameter if reasoning is enabled
+            if use_reasoning:
+                api_params["think"] = True
+                logger.debug(f"Reasoning enabled for request (model: {self.model})")
+
+            response = self.client.chat(**api_params)
+
+            # Process response to handle thinking content
+            return self._process_response(response, use_reasoning)
         except Exception as e:
             logger.error(f"Error generating text with Ollama: {e}")
             return ""
@@ -152,7 +166,8 @@ class OllamaProvider(BaseProvider):
 
         Args:
             messages (List[Dict[str, str]]): List of message dictionaries
-            **kwargs: Additional parameters (temperature, etc.)
+            **kwargs: Additional parameters (temperature, reasoning, etc.)
+                reasoning (bool): Override global reasoning setting
 
         Returns:
             Dict[str, Any]: Response dictionary
@@ -160,18 +175,33 @@ class OllamaProvider(BaseProvider):
         try:
             temperature = kwargs.get("temperature", self.temperature)
 
-            response = self.client.chat(
-                model=self.model,
-                messages=messages,
-                options={
+            # Check if reasoning should be enabled for this request
+            use_reasoning = kwargs.get("reasoning", self.reasoning_enabled)
+            use_reasoning = use_reasoning and self._is_reasoning_model()
+
+            # Build API call parameters
+            api_params = {
+                "model": self.model,
+                "messages": messages,
+                "options": {
                     "temperature": temperature,
                     "num_ctx": self.num_ctx,
                     "num_thread": self.num_thread,
                 },
-            )
+            }
+
+            # Add think parameter if reasoning is enabled
+            if use_reasoning:
+                api_params["think"] = True
+                logger.debug(f"Reasoning enabled for chat completion (model: {self.model})")
+
+            response = self.client.chat(**api_params)
+
+            # Process response to handle thinking content
+            processed_content = self._process_response(response, use_reasoning)
 
             return {
-                "content": response["message"]["content"],
+                "content": processed_content,
                 "role": response["message"]["role"],
                 "finish_reason": "stop",
             }
