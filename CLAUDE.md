@@ -90,8 +90,9 @@ isort .                  # Import sorting
 Uses `config.yaml` for all settings:
 - File paths for notes directories (daily, weekly, meetings, learnings)
 - **Inference provider selection** (`inference.provider`: "openai" or "ollama")
-  - OpenAI: API key, base_url (for OpenAI-compatible APIs)
-  - Ollama: base_url, model, temperature, num_ctx, num_thread, timeout
+  - OpenAI: `inference.openai.api_key`, `inference.openai.model`, `inference.openai.base_url`
+  - Ollama: `inference.ollama.model`, `inference.ollama.base_url`, temperature, num_ctx, num_thread, timeout
+  - Each provider has its own model setting in its own section
 - Embedding configuration (model_type: "openai" or "ollama") - separate from inference
 - Vector store settings (path, similarity thresholds, HNSW index parameters)
 - Search thresholds for different query types
