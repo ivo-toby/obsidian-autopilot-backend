@@ -1,5 +1,6 @@
 applescript==2021.2.9
 openai==1.63.0
+ollama>=0.1.0
 PyYAML==6.0.1
 scikit_learn==1.5.1
 chromadb==0.4.24
