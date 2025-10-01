@@ -29,10 +29,14 @@ class OpenAIProvider(BaseProvider):
 
         # Support both new and legacy config formats
         if "openai" in inference_config:
-            # New config format
+            # New config format - read from openai section first, then inference root, then legacy
             self.api_key = openai_config.get("api_key") or config.get("api_key", "")
             self.base_url = openai_config.get("base_url")
-            self.model = inference_config.get("model", "gpt-4o")
+            self.model = (
+                openai_config.get("model") or
+                inference_config.get("model") or
+                "gpt-4o"
+            )
         else:
             # Legacy config format
             self.api_key = config.get("api_key", "")

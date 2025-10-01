@@ -30,8 +30,12 @@ class OllamaProvider(BaseProvider):
         inference_config = config.get("inference", {})
         ollama_config = inference_config.get("ollama", {})
 
-        # Get model from ollama config or fall back to global model
-        self.model = ollama_config.get("model") or inference_config.get("model", "llama3.2")
+        # Get model from ollama config first, then inference root, then default
+        self.model = (
+            ollama_config.get("model") or
+            inference_config.get("model") or
+            "llama3.2"
+        )
         self.base_url = ollama_config.get("base_url", "http://localhost:11434")
         self.temperature = ollama_config.get("temperature", 0.7)
         self.num_ctx = ollama_config.get("num_ctx", 8192)
