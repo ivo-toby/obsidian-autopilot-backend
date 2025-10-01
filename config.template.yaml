@@ -2,15 +2,37 @@ daily_notes_file: "~/Documents/notes/jrnl/daily.md"
 daily_output_dir: "~/Documents/notes/daily"
 weekly_output_dir: "~/Documents/notes/Weekly"
 meeting_notes_output_dir: "~/Documents/notes/meetingnotes"
-base_url: "https://api.openai.com/v1/"
-api_key: ""
-reminders_list: ""
-model: "gpt-4o"
-chunking_model: "gpt-4o-mini"
 learnings_file: "~/Documents/notes/jrnl/learnings.md"
 learnings_output_dir: "~/Documents/notes/learnings"
+reminders_list: ""
 
 notes_base_dir: "~/Documents/notes" # Base directory for all notes
+
+# LLM Inference Configuration
+inference:
+  provider: "openai"  # Options: "openai" | "ollama"
+  model: "gpt-4o"     # Default model to use
+
+  # OpenAI-specific settings (used when provider=openai)
+  openai:
+    api_key: ""  # Set via environment variable or directly
+    base_url: "https://api.openai.com/v1"  # Optional, for OpenAI-compatible APIs
+
+  # Ollama-specific settings (used when provider=ollama)
+  ollama:
+    base_url: "http://localhost:11434"
+    model: "llama3.2"  # Can override the global model
+    temperature: 0.7
+    num_ctx: 8192      # Context window
+    num_thread: 4      # Number of threads
+    timeout: 120       # Request timeout in seconds
+
+# Deprecated settings (kept for backward compatibility)
+# Will be removed in future version - use 'inference' section instead
+api_key: ""
+model: "gpt-4o"
+base_url: "https://api.openai.com/v1/"
+chunking_model: "gpt-4o-mini"
 
 # Knowledge base settings
 knowledge_base:
