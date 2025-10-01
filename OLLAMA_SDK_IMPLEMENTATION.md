@@ -366,3 +366,264 @@ Successfully implemented native Ollama SDK support with:
 3. Deprecate `openai_service.py` in future release
 4. Consider implementing streaming responses
 5. Add more provider support (Anthropic, Groq, etc.)
+
+---
+
+## Feature Extension: Qwen3 Reasoning Mode Support
+
+### Overview
+
+Qwen3 and similar reasoning models (DeepSeek-R1, QwQ) support "thinking mode" where the model exposes its chain-of-thought reasoning before providing the final answer. This feature allows toggling reasoning on/off and controlling whether thinking content is saved or suppressed.
+
+### Research Findings
+
+**How Ollama Thinking Mode Works:**
+- Controlled via `think` parameter in API calls (boolean)
+- Response format when `think=True`:
+  - `message.thinking`: Contains the reasoning process (to be suppressed)
+  - `message.content`: Contains the final answer (to be saved)
+- Can be toggled per-request or globally configured
+- Supported models: Qwen3, DeepSeek-R1, QwQ-32B
+
+**Thinking Content Format:**
+- XML-style tags: `<think>...</think>` or `<thinking>...</thinking>`
+- Contains step-by-step reasoning, calculations, exploration of alternatives
+- Should be excluded from saved output and chat history
+
+**Control Methods:**
+1. API parameter: `think=True/False` in ollama.chat()
+2. Prompt tags: `/think` and `/no_think` appended to user prompts
+3. CLI flags: `--think` or `--think=false`
+
+### Proposed Architecture
+
+#### 1. Configuration Changes
+
+**File**: `config.yaml` / `config.template.yaml`
+
+```yaml
+inference:
+  provider: "ollama"
+
+  ollama:
+    model: "qwen3:0.6b"
+    base_url: "http://localhost:11434"
+
+    # Reasoning mode settings
+    reasoning:
+      enabled: false  # Global toggle for reasoning mode
+      save_thinking: false  # Whether to include thinking in saved outputs
+      log_thinking: false  # Whether to log thinking content (for debugging)
+      models:  # Models that support reasoning
+        - "qwen3"
+        - "deepseek-r1"
+        - "qwq"
+```
+
+#### 2. OllamaProvider Enhancement
+
+**File**: `services/providers/ollama_provider.py`
+
+Add reasoning configuration:
+
+```python
+class OllamaProvider(BaseProvider):
+    def __init__(self, config: Dict[str, Any]):
+        # Existing initialization...
+
+        # Reasoning mode configuration
+        reasoning_config = ollama_config.get("reasoning", {})
+        self.reasoning_enabled = reasoning_config.get("enabled", False)
+        self.save_thinking = reasoning_config.get("save_thinking", False)
+        self.log_thinking = reasoning_config.get("log_thinking", False)
+        self.reasoning_models = reasoning_config.get("models", ["qwen3", "deepseek-r1", "qwq"])
+
+    def _is_reasoning_model(self) -> bool:
+        """Check if current model supports reasoning."""
+        return any(name in self.model.lower() for name in self.reasoning_models)
+
+    def generate_text(self, prompt: str, **kwargs) -> str:
+        # Check if reasoning should be enabled for this request
+        use_reasoning = kwargs.get("reasoning", self.reasoning_enabled)
+        use_reasoning = use_reasoning and self._is_reasoning_model()
+
+        response = self.client.chat(
+            model=self.model,
+            messages=[{"role": "user", "content": prompt}],
+            options={
+                "temperature": temperature,
+                "num_ctx": self.num_ctx,
+                "num_thread": self.num_thread,
+            },
+            think=use_reasoning  # Enable thinking mode
+        )
+
+        # Process response to handle thinking content
+        return self._process_response(response, use_reasoning)
+
+    def _process_response(self, response: Dict, reasoning_enabled: bool) -> str:
+        """Process response and handle thinking content."""
+        message = response["message"]
+        content = message["content"]
+
+        if reasoning_enabled and "thinking" in message:
+            thinking = message["thinking"]
+
+            # Log thinking if configured
+            if self.log_thinking:
+                logger.debug(f"Model thinking:\n{thinking}")
+
+            # Optionally include thinking in output
+            if self.save_thinking:
+                return f"<thinking>\n{thinking}\n</thinking>\n\n{content}"
+
+            # Default: return only final content (suppress thinking)
+            return content
+
+        # Fallback: strip thinking tags if present in content
+        return self._strip_thinking_tags(content)
+
+    def _strip_thinking_tags(self, text: str) -> str:
+        """Remove <think> or <thinking> tags from text."""
+        import re
+        # Remove <think>...</think> blocks
+        text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
+        # Remove <thinking>...</thinking> blocks
+        text = re.sub(r'<thinking>.*?</thinking>', '', text, flags=re.DOTALL)
+        return text.strip()
+```
+
+#### 3. Dynamic Reasoning Toggle
+
+**File**: `services/llm_service.py`
+
+Add method to override reasoning per-request:
+
+```python
+class LLMService:
+    def generate_text(self, prompt: str, reasoning: bool = None, **kwargs) -> str:
+        """
+        Generate text with optional reasoning override.
+
+        Args:
+            prompt: Input prompt
+            reasoning: Override global reasoning setting (None uses config default)
+            **kwargs: Additional provider parameters
+        """
+        if reasoning is not None:
+            kwargs["reasoning"] = reasoning
+        return self.provider.generate_text(prompt, **kwargs)
+```
+
+#### 4. Service-Level Integration
+
+Update services to control reasoning for specific operations:
+
+```python
+# In MeetingService - disable reasoning for simple extraction
+summary_text = self.llm_service.generate_text(full_prompt, reasoning=False)
+
+# In LearningService - enable reasoning for complex analysis
+title = self.llm_service.generate_text(prompt, reasoning=True)
+```
+
+### Implementation Plan
+
+#### Phase 1: Configuration & Core Support
+- [ ] Add reasoning configuration to config.template.yaml
+- [ ] Update OllamaProvider to read reasoning settings
+- [ ] Implement `_is_reasoning_model()` detection
+- [ ] Add `think` parameter to ollama.chat() calls
+
+#### Phase 2: Response Processing
+- [ ] Implement `_process_response()` to handle thinking content
+- [ ] Implement `_strip_thinking_tags()` for cleanup
+- [ ] Add debug logging for thinking content
+- [ ] Handle both Ollama API format and tag-based format
+
+#### Phase 3: Service Integration
+- [ ] Update LLMService to support reasoning parameter
+- [ ] Add reasoning override to chat_completion methods
+- [ ] Update function calling to handle reasoning mode
+- [ ] Test with all core services (Summary, Meeting, Learning)
+
+#### Phase 4: Testing & Validation
+- [ ] Unit tests for reasoning configuration
+- [ ] Unit tests for thinking content stripping
+- [ ] Integration tests with real Qwen3 model
+- [ ] Verify thinking content is not saved by default
+- [ ] Test reasoning toggle per-request
+
+#### Phase 5: Documentation
+- [ ] Update config.template.yaml with reasoning examples
+- [ ] Update CLAUDE.md with reasoning mode documentation
+- [ ] Add README section on using reasoning models
+- [ ] Document which operations use reasoning by default
+- [ ] Add troubleshooting for reasoning models
+
+### Configuration Examples
+
+**Example 1: Reasoning Disabled (Default)**
+```yaml
+inference:
+  ollama:
+    model: "qwen3:0.6b"
+    reasoning:
+      enabled: false
+```
+
+**Example 2: Reasoning Enabled, Thinking Suppressed (Recommended)**
+```yaml
+inference:
+  ollama:
+    model: "qwen3:14b"
+    reasoning:
+      enabled: true
+      save_thinking: false  # Don't save thinking tokens
+      log_thinking: true    # But log for debugging
+```
+
+**Example 3: Reasoning Enabled, Thinking Saved (Full Transparency)**
+```yaml
+inference:
+  ollama:
+    model: "qwen3:30b"
+    reasoning:
+      enabled: true
+      save_thinking: true   # Include thinking in outputs
+      log_thinking: true
+```
+
+### Edge Cases & Considerations
+
+1. **Non-reasoning models**: If reasoning is enabled but model doesn't support it, gracefully fallback
+2. **Function calling**: Thinking content should be excluded from function call arguments
+3. **Chat history**: Thinking should not be included in multi-turn conversation history
+4. **Performance**: Reasoning mode increases token usage and latency - document tradeoffs
+5. **Model detection**: Maintain list of reasoning-capable models, allow user override
+
+### Success Criteria
+
+- ✅ Users can toggle reasoning mode via config
+- ✅ Thinking content is suppressed by default when reasoning is enabled
+- ✅ Users can optionally save thinking content for transparency
+- ✅ Reasoning can be overridden per-request
+- ✅ Non-reasoning models work normally even if reasoning is configured
+- ✅ Function calling excludes thinking from structured outputs
+- ✅ Performance impact is documented
+- ✅ All tests pass with reasoning enabled and disabled
+
+### Dependencies
+
+- Ollama Python SDK >= 0.1.0 (already installed)
+- Python >= 3.8 (already required)
+
+### Timeline Estimate
+
+- Phase 1: 2-3 hours
+- Phase 2: 2-3 hours
+- Phase 3: 2-3 hours
+- Phase 4: 3-4 hours
+- Phase 5: 1-2 hours
+
+**Total**: ~12-15 hours of implementation + testing
