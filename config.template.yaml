@@ -27,6 +27,18 @@ inference:
     num_thread: 4      # Number of threads
     timeout: 120       # Request timeout in seconds
 
+    # Reasoning mode settings (for Qwen3, DeepSeek-R1, QwQ models)
+    reasoning:
+      enabled: false        # Global toggle for reasoning mode
+      save_thinking: false  # Whether to include thinking tokens in saved outputs
+      log_thinking: false   # Whether to log thinking content (for debugging)
+      models:               # Models that support reasoning mode
+        - "qwen3"
+        - "qwen2.5"
+        - "deepseek-r1"
+        - "qwq"
+        - "smallthinker"
+
 # Deprecated settings (kept for backward compatibility)
 # These keys are OPTIONAL - the 'inference' section above is now preferred
 # You can safely remove these lines if you're using the inference configuration
