@@ -16,7 +16,7 @@ import sys
 from services.knowledge.link_service import LinkService
 from services.learning_service import LearningService
 from services.meeting_service import MeetingService
-from services.openai_service import OpenAIService
+from services.llm_service import LLMService
 from services.summary_service import SummaryService
 from services.vector_store import ChunkingService, EmbeddingService, VectorStoreService
 from utils.cli import setup_argparser
@@ -69,9 +69,7 @@ def process_new_learnings(cfg, cli_args):
     learning_service = LearningService(
         cfg["learnings_file"], cfg["learnings_output_dir"]
     )
-    learning_service.process_new_learnings(
-        OpenAIService(api_key=cfg["api_key"], model=cfg["model"], base_url=cfg.get("base_url"))
-    )
+    learning_service.process_new_learnings(LLMService(cfg))
 
 
 def process_knowledge_base(cfg, cli_args):
