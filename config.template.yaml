@@ -28,11 +28,11 @@ inference:
     timeout: 120       # Request timeout in seconds
 
 # Deprecated settings (kept for backward compatibility)
-# Will be removed in future version - use 'inference' section instead
-api_key: ""
-model: "gpt-4o"
-base_url: "https://api.openai.com/v1/"
-chunking_model: "gpt-4o-mini"
+# These keys are OPTIONAL - the 'inference' section above is now preferred
+# You can safely remove these lines if you're using the inference configuration
+# api_key: ""
+# model: "gpt-4o"
+# base_url: "https://api.openai.com/v1/"
 
 # Knowledge base settings
 knowledge_base:
