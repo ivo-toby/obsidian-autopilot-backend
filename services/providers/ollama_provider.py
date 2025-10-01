@@ -57,6 +57,64 @@ class OllamaProvider(BaseProvider):
         if self.reasoning_enabled:
             logger.info(f"Reasoning mode enabled (save_thinking={self.save_thinking}, log_thinking={self.log_thinking})")
 
+    def _is_reasoning_model(self) -> bool:
+        """
+        Check if current model supports reasoning mode.
+
+        Returns:
+            bool: True if model supports reasoning, False otherwise
+        """
+        model_lower = self.model.lower()
+        return any(name in model_lower for name in self.reasoning_models)
+
+    def _strip_thinking_tags(self, text: str) -> str:
+        """
+        Remove <think> or <thinking> tags from text.
+
+        Args:
+            text (str): Text potentially containing thinking tags
+
+        Returns:
+            str: Text with thinking tags removed
+        """
+        import re
+        # Remove <think>...</think> blocks
+        text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
+        # Remove <thinking>...</thinking> blocks
+        text = re.sub(r'<thinking>.*?</thinking>', '', text, flags=re.DOTALL)
+        return text.strip()
+
+    def _process_response(self, response: Dict[str, Any], reasoning_enabled: bool) -> str:
+        """
+        Process response and handle thinking content.
+
+        Args:
+            response (Dict[str, Any]): Raw response from Ollama API
+            reasoning_enabled (bool): Whether reasoning was enabled for this request
+
+        Returns:
+            str: Processed response content
+        """
+        message = response.get("message", {})
+        content = message.get("content", "")
+
+        if reasoning_enabled and "thinking" in message:
+            thinking = message["thinking"]
+
+            # Log thinking if configured
+            if self.log_thinking:
+                logger.debug(f"Model thinking:\n{thinking}")
+
+            # Optionally include thinking in output
+            if self.save_thinking:
+                return f"<thinking>\n{thinking}\n</thinking>\n\n{content}"
+
+            # Default: return only final content (suppress thinking)
+            return content
+
+        # Fallback: strip thinking tags if present in content
+        return self._strip_thinking_tags(content)
+
     def generate_text(self, prompt: str, **kwargs) -> str:
         """
         Generate text from a prompt using Ollama.
