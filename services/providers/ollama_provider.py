@@ -42,9 +42,20 @@ class OllamaProvider(BaseProvider):
         self.num_thread = ollama_config.get("num_thread", 4)
         self.timeout = ollama_config.get("timeout", 120)
 
+        # Reasoning mode configuration
+        reasoning_config = ollama_config.get("reasoning", {})
+        self.reasoning_enabled = reasoning_config.get("enabled", False)
+        self.save_thinking = reasoning_config.get("save_thinking", False)
+        self.log_thinking = reasoning_config.get("log_thinking", False)
+        self.reasoning_models = reasoning_config.get("models", [
+            "qwen3", "qwen2.5", "deepseek-r1", "qwq", "smallthinker"
+        ])
+
         # Initialize Ollama client
         self.client = ollama.Client(host=self.base_url)
         logger.info(f"Initialized Ollama provider with model: {self.model}")
+        if self.reasoning_enabled:
+            logger.info(f"Reasoning mode enabled (save_thinking={self.save_thinking}, log_thinking={self.log_thinking})")
 
     def generate_text(self, prompt: str, **kwargs) -> str:
         """
