@@ -39,8 +39,14 @@ class EmbeddingService:
     def _initialize_embedding_model(self) -> Embeddings:
         """Initialize the appropriate embedding model based on configuration."""
         if self.model_type == "openai":
+            # Get API key from embeddings config, inference config, or legacy config
+            api_key = (
+                self.embedding_config.get("api_key") or
+                self.config.get("inference", {}).get("openai", {}).get("api_key") or
+                self.config.get("api_key", "")
+            )
             return OpenAIEmbeddings(
-                openai_api_key=self.config["api_key"],
+                openai_api_key=api_key,
                 model=self.model_name,
                 chunk_size=self.batch_size,
             )
