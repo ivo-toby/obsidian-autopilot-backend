@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Dict, Optional
 
 from services.notes_service import NotesService
-from services.openai_service import OpenAIService
+from services.llm_service import LLMService
 from utils.file_handler import create_output_dir, write_summary_to_file
 from utils.markdown import create_meeting_notes_content
 import pyperclip
@@ -27,9 +27,7 @@ class MeetingService:
         """
         self.config = config
         self.notes_service = NotesService(config["daily_notes_file"])
-        self.openai_service = OpenAIService(
-            api_key=config["api_key"], model=config["model"], base_url=config.get("base_url")
-        )
+        self.llm_service = LLMService(config)
 
     def process_meeting_notes(
         self, date_str: Optional[str] = None, dry_run: bool = False
@@ -51,7 +49,7 @@ class MeetingService:
             print("No notes found for today.")
             return
 
-        meeting_notes = self.openai_service.generate_meeting_notes(today_notes)
+        meeting_notes = self.llm_service.generate_meeting_notes(today_notes)
 
         if not dry_run:
             for meeting in meeting_notes.get("meetings", []):
@@ -94,7 +92,7 @@ class MeetingService:
         full_prompt = f"{template}\n\n'''TRANSCRIPT'''\n{transcript}"
 
         # Call the LLM
-        summary_text = self.openai_service.generate_text(full_prompt)
+        summary_text = self.llm_service.generate_text(full_prompt)
 
         # Output or save
         if dry_run:
@@ -127,7 +125,7 @@ class MeetingService:
 
 Return ONLY the topic name, nothing else. This will be used as a filename."""
 
-            inferred_topic = self.openai_service.generate_text(prompt).strip()
+            inferred_topic = self.llm_service.generate_text(prompt).strip()
 
             # Clean up the inferred topic - remove any markdown, quotes, etc.
             inferred_topic = re.sub(r'[^\w\s-]', '', inferred_topic)
