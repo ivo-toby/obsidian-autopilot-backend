@@ -100,5 +100,49 @@ def test_load_config_missing_required_fields(temp_dir):
     config_file.write_text("optional_field: value")
 
     # Execute and Assert
-    with pytest.raises(KeyError):
+    with pytest.raises(KeyError, match="Required field missing"):
+        load_config(str(config_file))
+
+
+def test_load_config_with_new_inference_format(temp_dir):
+    """Test loading configuration with new inference format (no legacy keys)."""
+    config_content = """
+daily_notes_file: ~/notes/daily.md
+daily_output_dir: ~/notes/daily
+weekly_output_dir: ~/notes/weekly
+notes_base_dir: ~/notes
+inference:
+  provider: openai
+  model: gpt-4o
+  openai:
+    api_key: test-api-key
+    base_url: https://api.openai.com/v1
+"""
+    config_file = temp_dir / "config.yaml"
+    config_file.write_text(config_content)
+
+    # Execute
+    config = load_config(str(config_file))
+
+    # Assert
+    assert config["inference"]["provider"] == "openai"
+    assert config["inference"]["model"] == "gpt-4o"
+    assert config["inference"]["openai"]["api_key"] == "test-api-key"
+    # Should not have legacy keys
+    assert "api_key" not in config or config.get("api_key") is None
+
+
+def test_load_config_missing_llm_configuration(temp_dir):
+    """Test that missing LLM configuration raises helpful error."""
+    config_content = """
+daily_notes_file: ~/notes/daily.md
+daily_output_dir: ~/notes/daily
+weekly_output_dir: ~/notes/weekly
+notes_base_dir: ~/notes
+"""
+    config_file = temp_dir / "config.yaml"
+    config_file.write_text(config_content)
+
+    # Execute and Assert
+    with pytest.raises(KeyError, match="Missing LLM configuration"):
         load_config(str(config_file))
