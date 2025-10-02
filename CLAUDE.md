@@ -166,7 +166,12 @@ The codebase uses a provider abstraction pattern for LLM operations:
 - Requires Ollama service running (`ollama serve`)
 
 **Reasoning Mode Support:**
-- Supports Ollama's reasoning mode for compatible models (Qwen3, DeepSeek-R1, QwQ, etc.)
+- Supports Ollama's reasoning mode for compatible models (automatically detected)
+- **Automatic capability detection**: Models are checked programmatically via Ollama API
+  - Detects reasoning support by inspecting model templates for `IsThinkSet` or `.Thinking` markers
+  - Detects tool calling support by checking for `.Tools` or `.ToolCalls` in templates
+  - Falls back to known model lists if API detection fails
+  - Results are cached to avoid repeated API calls
 - Configuration in `config.yaml`:
   ```yaml
   inference:
@@ -175,12 +180,7 @@ The codebase uses a provider abstraction pattern for LLM operations:
         enabled: false        # Global toggle for reasoning mode
         save_thinking: false  # Include thinking tokens in output
         log_thinking: false   # Log thinking content for debugging
-        models:               # Models that support reasoning
-          - "qwen3"
-          - "qwen2.5"
-          - "deepseek-r1"
-          - "qwq"
-          - "smallthinker"
+        # No need to specify models - automatic detection via API!
   ```
 - When enabled, adds `think=True` parameter to Ollama API calls
 - Response processing:
@@ -189,7 +189,7 @@ The codebase uses a provider abstraction pattern for LLM operations:
   - Set `save_thinking: true` to include thinking in output as `<thinking>...</thinking>`
   - Set `log_thinking: true` to log thinking content for debugging
 - Per-request override: Pass `reasoning=True/False` to any LLM method
-- Auto-detection: Only enables reasoning for models in the `models` list
+- Programmatic detection: Automatically checks model capabilities via template inspection
 - Works with all LLM operations: `generate_text()`, `chat_completion()`, `chat_completion_with_function()`
 
 ### Embedding Support (Separate from Inference)
