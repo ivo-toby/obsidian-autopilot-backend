@@ -19,6 +19,8 @@ inference:
     model: "gpt-4o"  # Model to use with OpenAI
 
   # Ollama-specific settings (used when provider=ollama)
+  # NOTE: Tool calling and reasoning support are automatically detected
+  # by inspecting model templates via Ollama's API - no manual configuration needed!
   ollama:
     base_url: "http://localhost:11434"
     model: "llama3.2"  # Model to use with Ollama
@@ -27,17 +29,16 @@ inference:
     num_thread: 4      # Number of threads
     timeout: 120       # Request timeout in seconds
 
-    # Reasoning mode settings (for Qwen3, DeepSeek-R1, QwQ models)
+    # Reasoning mode settings (automatically detected for compatible models)
+    # Supported models include: Qwen3, Qwen2.5, DeepSeek-R1, DeepSeek-V3,
+    # QwQ, Smallthinker, GPT-OSS, Magistral, and others with reasoning templates
     reasoning:
       enabled: false        # Global toggle for reasoning mode
       save_thinking: false  # Whether to include thinking tokens in saved outputs
       log_thinking: false   # Whether to log thinking content (for debugging)
-      models:               # Models that support reasoning mode
-        - "qwen3"
-        - "qwen2.5"
-        - "deepseek-r1"
-        - "qwq"
-        - "smallthinker"
+      # NOTE: Reasoning support is automatically detected via Ollama's API
+      # by checking model templates for reasoning markers (IsThinkSet, .Thinking)
+      # No need to manually specify models - detection is programmatic!
 
 # Deprecated settings (kept for backward compatibility)
 # These keys are OPTIONAL - the 'inference' section above is now preferred
