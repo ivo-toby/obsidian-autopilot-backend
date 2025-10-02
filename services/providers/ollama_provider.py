@@ -53,6 +53,10 @@ class OllamaProvider(BaseProvider):
 
         # Initialize Ollama client
         self.client = ollama.Client(host=self.base_url)
+
+        # Cache for tool support detection (avoid repeated API calls)
+        self._tool_support_cache = None
+
         logger.info(f"Initialized Ollama provider with model: {self.model}")
         if self.reasoning_enabled:
             logger.info(f"Reasoning mode enabled (save_thinking={self.save_thinking}, log_thinking={self.log_thinking})")
@@ -248,12 +252,49 @@ class OllamaProvider(BaseProvider):
         """
         Check if the current model supports native tool calling.
 
+        Uses programmatic detection by checking the model's template for tool calling
+        logic. Falls back to a hardcoded list if the API call fails.
+
         Returns:
             bool: True if model supports tools, False otherwise
         """
-        # Models known to support tools
-        tool_supported_models = ["llama3.1", "llama3.2", "llama3.3", "mistral", "mixtral"]
-        return any(model in self.model.lower() for model in tool_supported_models)
+        # Return cached result if available
+        if self._tool_support_cache is not None:
+            return self._tool_support_cache
+
+        try:
+            # Get model information from Ollama
+            logger.debug(f"Checking tool support for model: {self.model}")
+            response = self.client.show(self.model)
+            template = response.get("template", "")
+
+            # Check if template contains tool calling logic
+            # Models with tool support have .Tools or .ToolCalls in their template
+            supports_tools = ".Tools" in template or ".ToolCalls" in template
+
+            logger.info(f"Model {self.model} tool support: {supports_tools} (detected programmatically)")
+            self._tool_support_cache = supports_tools
+            return supports_tools
+
+        except Exception as e:
+            logger.warning(f"Failed to detect tool support programmatically: {e}")
+            logger.warning("Falling back to hardcoded model list")
+
+            # Fallback to hardcoded list if API call fails
+            tool_supported_models = [
+                "llama3.1", "llama3.2", "llama3.3",
+                "mistral", "mistral-nemo", "mistral-small", "mistral-large",
+                "mixtral",
+                "gpt-oss",
+                "qwen2", "qwen2.5", "qwen3",
+                "command-r", "command-r-plus",
+                "firefunction",
+                "granite3"
+            ]
+            supports_tools = any(model in self.model.lower() for model in tool_supported_models)
+            logger.info(f"Model {self.model} tool support: {supports_tools} (fallback detection)")
+            self._tool_support_cache = supports_tools
+            return supports_tools
 
     def _chat_with_native_tools(
         self,

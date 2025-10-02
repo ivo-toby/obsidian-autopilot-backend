@@ -345,15 +345,64 @@ class TestOllamaProviderBasics(unittest.TestCase):
 
     @patch('services.providers.ollama_provider.ollama.Client')
     def test_model_supports_tools(self, mock_client_class):
-        """Test tool support detection."""
+        """Test tool support detection using programmatic template checking."""
+        # Template with tool support (contains .Tools)
+        tools_template = """{{- if .Tools }}
+# Tools
+You may call one or more functions...
+{{- end }}"""
+
+        # Template without tool support
+        no_tools_template = """{{- if .Messages }}
+{{- range .Messages }}
+{{ .Content }}
+{{- end }}
+{{- end }}"""
+
         test_cases = [
-            ("llama3.1:8b", True),
-            ("llama3.2:3b", True),
-            ("llama3.3:70b", True),
-            ("mistral:7b", True),
-            ("mixtral:8x7b", True),
-            ("qwen3:14b", False),
-            ("gemma:7b", False),
+            ("llama3.1:8b", tools_template, True),
+            ("llama3.2:3b", tools_template, True),
+            ("mistral:7b", tools_template, True),
+            ("gpt-oss:20b", tools_template, True),
+            ("qwen3:14b", tools_template, True),  # qwen3 actually supports tools
+            ("gemma:7b", no_tools_template, False),
+        ]
+
+        for model, template, expected in test_cases:
+            config = {
+                "inference": {
+                    "provider": "ollama",
+                    "ollama": {
+                        "model": model
+                    }
+                }
+            }
+
+            # Mock the client.show() response
+            mock_instance = Mock()
+            mock_instance.show.return_value = {"template": template}
+            mock_client_class.return_value = mock_instance
+
+            provider = OllamaProvider(config)
+
+            self.assertEqual(
+                provider._model_supports_tools(),
+                expected,
+                f"Model {model} should {'support' if expected else 'not support'} tools"
+            )
+
+    @patch('services.providers.ollama_provider.ollama.Client')
+    def test_model_supports_tools_fallback(self, mock_client_class):
+        """Test tool support detection fallback when API call fails."""
+        # Mock client.show() to raise an exception
+        mock_instance = Mock()
+        mock_instance.show.side_effect = Exception("API error")
+        mock_client_class.return_value = mock_instance
+
+        test_cases = [
+            ("llama3.1:8b", True),  # In fallback list
+            ("gpt-oss:20b", True),  # In fallback list
+            ("unknown-model:1b", False),  # Not in fallback list
         ]
 
         for model, expected in test_cases:
@@ -370,8 +419,34 @@ class TestOllamaProviderBasics(unittest.TestCase):
             self.assertEqual(
                 provider._model_supports_tools(),
                 expected,
-                f"Model {model} should {'support' if expected else 'not support'} tools"
+                f"Model {model} should {'support' if expected else 'not support'} tools (fallback)"
             )
+
+    @patch('services.providers.ollama_provider.ollama.Client')
+    def test_model_supports_tools_caching(self, mock_client_class):
+        """Test that tool support detection is cached."""
+        mock_instance = Mock()
+        mock_instance.show.return_value = {"template": "{{- if .Tools }}tools{{- end }}"}
+        mock_client_class.return_value = mock_instance
+
+        config = {
+            "inference": {
+                "provider": "ollama",
+                "ollama": {
+                    "model": "llama3.2"
+                }
+            }
+        }
+        provider = OllamaProvider(config)
+
+        # Call twice
+        result1 = provider._model_supports_tools()
+        result2 = provider._model_supports_tools()
+
+        # Should only call show() once due to caching
+        self.assertEqual(mock_instance.show.call_count, 1)
+        self.assertEqual(result1, result2)
+        self.assertTrue(result1)
 
 
 if __name__ == "__main__":
