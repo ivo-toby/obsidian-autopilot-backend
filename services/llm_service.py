@@ -84,6 +84,7 @@ class LLMService:
         Args:
             prompt (str): Input prompt
             **kwargs: Additional provider-specific parameters
+                reasoning (bool): Enable reasoning mode (for supported models)
 
         Returns:
             str: Generated text
@@ -139,6 +140,7 @@ class LLMService:
         messages: List[Dict[str, str]],
         functions: List[Dict[str, Any]],
         function_call: Dict[str, str],
+        **kwargs
     ) -> Optional[Dict[str, Any]]:
         """
         Make a chat completion request with function calling.
@@ -150,12 +152,14 @@ class LLMService:
             messages (List[Dict[str, str]]): Chat messages
             functions (List[Dict[str, Any]]): Function definitions
             function_call (Dict[str, str]): Function to call
+            **kwargs: Additional provider-specific parameters
+                reasoning (bool): Enable reasoning mode (for supported models)
 
         Returns:
             Optional[Dict[str, Any]]: Response with function call or None if error
         """
         result = self.provider.chat_completion_with_function(
-            messages, functions, function_call
+            messages, functions, function_call, **kwargs
         )
 
         if result and "function_call" in result:
