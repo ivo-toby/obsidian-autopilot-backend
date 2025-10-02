@@ -16,12 +16,9 @@ from services.summary_service import SummaryService
 
 
 @pytest.fixture
-def mock_openai_client():
-    """Create a mock OpenAI client."""
+def mock_llm_service():
+    """Create a mock LLM service."""
     mock = MagicMock()
-    mock.chat = MagicMock()
-    mock.chat.completions = MagicMock()
-    mock.chat.completions.create = MagicMock()
     return mock
 
 
@@ -42,14 +39,14 @@ def sample_config():
 
 
 @pytest.fixture
-def summary_service(sample_config, temp_dir, mock_openai_client):
+def summary_service(sample_config, temp_dir, mock_llm_service):
     """Create a SummaryService instance with temporary directories."""
     config = sample_config.copy()
     config["daily_output_dir"] = str(temp_dir / "daily")
     config["weekly_output_dir"] = str(temp_dir / "weekly")
     config["notes_base_dir"] = str(temp_dir)
 
-    with patch("services.openai_service.OpenAI", return_value=mock_openai_client):
+    with patch("services.summary_service.LLMService", return_value=mock_llm_service):
         service = SummaryService(config)
         return service
 
@@ -81,12 +78,12 @@ def sample_notes_structure(temp_dir):
 
 def test_init_summary_service(sample_config):
     """Test summary service initialization."""
-    with patch("services.openai_service.OpenAI") as mock_openai:
+    with patch("services.summary_service.LLMService") as mock_llm:
         service = SummaryService(sample_config)
         assert service.config == sample_config
         assert service.notes_service is not None
-        assert service.openai_service is not None
-        mock_openai.assert_called_once_with(api_key="test-api-key", base_url=None)
+        assert service.llm_service is not None
+        mock_llm.assert_called_once_with(sample_config)
 
 
 def test_get_all_notes(summary_service, sample_notes_structure):
@@ -139,7 +136,7 @@ def test_process_daily_notes_success(summary_service, temp_dir):
         "actionable_items": ["Task 1", "Task 2"],
         "tags": ["tag1", "tag2"]
     }
-    summary_service.openai_service.summarize_notes_and_identify_tasks = Mock(return_value=mock_result)
+    summary_service.llm_service.summarize_notes_and_identify_tasks = Mock(return_value=mock_result)
 
     with patch("services.reminder_service.ReminderService.add_to_reminders") as mock_add_reminder, \
          patch("builtins.print") as mock_print:
@@ -175,7 +172,7 @@ def test_process_daily_notes_dry_run(summary_service, temp_dir):
         "actionable_items": ["Task 1"],
         "tags": ["tag1"]
     }
-    summary_service.openai_service.summarize_notes_and_identify_tasks = Mock(return_value=mock_result)
+    summary_service.llm_service.summarize_notes_and_identify_tasks = Mock(return_value=mock_result)
 
     with patch("services.reminder_service.ReminderService.add_to_reminders") as mock_add_reminder:
         # Execute
@@ -198,7 +195,7 @@ def test_process_daily_notes_skip_reminders(summary_service):
         "actionable_items": ["Task 1"],
         "tags": ["tag1"]
     }
-    summary_service.openai_service.summarize_notes_and_identify_tasks = Mock(return_value=mock_result)
+    summary_service.llm_service.summarize_notes_and_identify_tasks = Mock(return_value=mock_result)
 
     with patch("services.reminder_service.ReminderService.add_to_reminders") as mock_add_reminder:
         # Execute
@@ -227,7 +224,7 @@ def test_process_daily_notes_replace_summary(summary_service, temp_dir):
         "actionable_items": ["Task 1"],
         "tags": ["tag1"]
     }
-    summary_service.openai_service.summarize_notes_and_identify_tasks = Mock(return_value=mock_result)
+    summary_service.llm_service.summarize_notes_and_identify_tasks = Mock(return_value=mock_result)
 
     # Execute
     summary_service.process_daily_notes(date_str="2024-02-18", replace_summary=True)
@@ -246,7 +243,7 @@ def test_process_weekly_notes_success(summary_service, temp_dir):
     summary_service.notes_service.extract_weekly_notes = Mock(return_value=mock_notes)
 
     mock_summary = "Test weekly summary"
-    summary_service.openai_service.generate_weekly_summary = Mock(return_value=mock_summary)
+    summary_service.llm_service.generate_weekly_summary = Mock(return_value=mock_summary)
 
     with patch("builtins.print") as mock_print:
         # Execute
@@ -270,7 +267,7 @@ def test_process_weekly_notes_dry_run(summary_service, temp_dir):
     mock_notes = "Sample weekly notes"
     summary_service.notes_service.load_notes = Mock(return_value=mock_notes)
     summary_service.notes_service.extract_weekly_notes = Mock(return_value=mock_notes)
-    summary_service.openai_service.generate_weekly_summary = Mock(return_value="Test summary")
+    summary_service.llm_service.generate_weekly_summary = Mock(return_value="Test summary")
 
     # Execute
     summary_service.process_weekly_notes(dry_run=True)
@@ -294,7 +291,7 @@ def test_process_weekly_notes_replace_summary(summary_service, temp_dir):
     output_file.write_text("Existing summary")
 
     mock_summary = "New weekly summary"
-    summary_service.openai_service.generate_weekly_summary = Mock(return_value=mock_summary)
+    summary_service.llm_service.generate_weekly_summary = Mock(return_value=mock_summary)
 
     # Execute
     summary_service.process_weekly_notes(date_str="2024-02-18", replace_summary=True)

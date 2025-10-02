@@ -121,17 +121,17 @@ def mock_embedding_service():
 @pytest.fixture
 def link_service(mock_vector_store, mock_chunking_service, mock_embedding_service, tmp_path):
     """Create a LinkService instance with mocked dependencies."""
+    # Update mock_vector_store config to include notes_base_dir pointing to tmp_path
+    # This ensures new LinkService instances can find the same state file
+    mock_vector_store.config["notes_base_dir"] = str(tmp_path)
+
     # Mock os.path.exists INSTEAD of pathlib
     with patch('services.knowledge.link_service.os.path.exists', return_value=True, autospec=True) as mock_os_exists:
-        # Mock the analysis state file path resolution to use tmp_path
-        with patch('services.knowledge.link_service.os.path.expanduser', return_value=str(tmp_path)):
-             service = LinkService(mock_vector_store, mock_chunking_service, mock_embedding_service)
-             service.base_path = str(tmp_path)
-             service.analysis_state_file = os.path.join(str(tmp_path), "analysis_state.json")
-             # Initialize state - use os.path.exists which should be mocked
-             if not os.path.exists(service.analysis_state_file):
-                 service.analysis_state = {}
-             return service
+        # Create the service - it will use tmp_path from config
+        service = LinkService(mock_vector_store, mock_chunking_service, mock_embedding_service)
+        # Ensure analysis state file directory exists
+        os.makedirs(os.path.join(str(tmp_path), ".vector_store"), exist_ok=True)
+        return service
 
 def test_analyze_relationships(link_service, mock_vector_store):
     """Test relationship analysis for a note."""
