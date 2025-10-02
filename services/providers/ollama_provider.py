@@ -270,6 +270,7 @@ class OllamaProvider(BaseProvider):
             functions: OpenAI-format function definitions
             function_call: Function to call
             **kwargs: Additional parameters
+                reasoning (bool): Override global reasoning setting
 
         Returns:
             Optional[Dict[str, Any]]: Response with function call
@@ -280,20 +281,36 @@ class OllamaProvider(BaseProvider):
 
             temperature = kwargs.get("temperature", self.temperature)
 
-            response = self.client.chat(
-                model=self.model,
-                messages=messages,
-                tools=tools,
-                options={
+            # Check if reasoning should be enabled for this request
+            use_reasoning = kwargs.get("reasoning", self.reasoning_enabled)
+            use_reasoning = use_reasoning and self._is_reasoning_model()
+
+            # Build API call parameters
+            api_params = {
+                "model": self.model,
+                "messages": messages,
+                "tools": tools,
+                "options": {
                     "temperature": temperature,
                     "num_ctx": self.num_ctx,
                     "num_thread": self.num_thread,
                 },
-            )
+            }
+
+            # Add think parameter if reasoning is enabled
+            if use_reasoning:
+                api_params["think"] = True
+                logger.debug(f"Reasoning enabled for function calling (model: {self.model})")
+
+            response = self.client.chat(**api_params)
 
             message = response["message"]
+
+            # Process content to handle thinking
+            processed_content = self._process_response(response, use_reasoning)
+
             result = {
-                "content": message.get("content", ""),
+                "content": processed_content,
                 "role": message["role"],
                 "finish_reason": "stop",
             }
@@ -327,6 +344,7 @@ class OllamaProvider(BaseProvider):
             functions: OpenAI-format function definitions
             function_call: Function to call
             **kwargs: Additional parameters
+                reasoning (bool): Override global reasoning setting
 
         Returns:
             Optional[Dict[str, Any]]: Response with parsed function call
@@ -353,25 +371,38 @@ class OllamaProvider(BaseProvider):
 
             temperature = kwargs.get("temperature", 0.3)  # Lower temp for structured output
 
-            response = self.client.chat(
-                model=self.model,
-                messages=enhanced_messages,
-                options={
+            # Check if reasoning should be enabled for this request
+            use_reasoning = kwargs.get("reasoning", self.reasoning_enabled)
+            use_reasoning = use_reasoning and self._is_reasoning_model()
+
+            # Build API call parameters
+            api_params = {
+                "model": self.model,
+                "messages": enhanced_messages,
+                "options": {
                     "temperature": temperature,
                     "num_ctx": self.num_ctx,
                     "num_thread": self.num_thread,
                 },
-                format="json",  # Request JSON output
-            )
+                "format": "json",  # Request JSON output
+            }
 
-            content = response["message"]["content"]
+            # Add think parameter if reasoning is enabled
+            if use_reasoning:
+                api_params["think"] = True
+                logger.debug(f"Reasoning enabled for structured output (model: {self.model})")
+
+            response = self.client.chat(**api_params)
+
+            # Process content to handle thinking
+            processed_content = self._process_response(response, use_reasoning)
 
             # Try to parse JSON from response
-            parsed_args = self._extract_json(content)
+            parsed_args = self._extract_json(processed_content)
 
             if parsed_args:
                 return {
-                    "content": content,
+                    "content": processed_content,
                     "role": "assistant",
                     "finish_reason": "stop",
                     "function_call": {
@@ -380,7 +411,7 @@ class OllamaProvider(BaseProvider):
                     }
                 }
 
-            logger.warning(f"Could not parse function arguments from response: {content}")
+            logger.warning(f"Could not parse function arguments from response: {processed_content}")
             return None
 
         except Exception as e:
