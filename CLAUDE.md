@@ -165,6 +165,33 @@ The codebase uses a provider abstraction pattern for LLM operations:
 - Configurable Ollama-specific options: num_ctx, num_thread, timeout
 - Requires Ollama service running (`ollama serve`)
 
+**Reasoning Mode Support:**
+- Supports Ollama's reasoning mode for compatible models (Qwen3, DeepSeek-R1, QwQ, etc.)
+- Configuration in `config.yaml`:
+  ```yaml
+  inference:
+    ollama:
+      reasoning:
+        enabled: false        # Global toggle for reasoning mode
+        save_thinking: false  # Include thinking tokens in output
+        log_thinking: false   # Log thinking content for debugging
+        models:               # Models that support reasoning
+          - "qwen3"
+          - "qwen2.5"
+          - "deepseek-r1"
+          - "qwq"
+          - "smallthinker"
+  ```
+- When enabled, adds `think=True` parameter to Ollama API calls
+- Response processing:
+  - Thinking tokens available in `response["message"]["thinking"]`
+  - By default, thinking is suppressed (only final answer returned)
+  - Set `save_thinking: true` to include thinking in output as `<thinking>...</thinking>`
+  - Set `log_thinking: true` to log thinking content for debugging
+- Per-request override: Pass `reasoning=True/False` to any LLM method
+- Auto-detection: Only enables reasoning for models in the `models` list
+- Works with all LLM operations: `generate_text()`, `chat_completion()`, `chat_completion_with_function()`
+
 ### Embedding Support (Separate from Inference)
 Embeddings use `EmbeddingService` with separate configuration:
 - Embeddings: Set `embeddings.model_type: "ollama"` and `embeddings.model_name: "mxbai-embed-large"`
