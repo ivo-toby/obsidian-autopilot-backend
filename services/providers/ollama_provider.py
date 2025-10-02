@@ -54,8 +54,9 @@ class OllamaProvider(BaseProvider):
         # Initialize Ollama client
         self.client = ollama.Client(host=self.base_url)
 
-        # Cache for tool support detection (avoid repeated API calls)
+        # Cache for capability detection (avoid repeated API calls)
         self._tool_support_cache = None
+        self._reasoning_support_cache = None
 
         logger.info(f"Initialized Ollama provider with model: {self.model}")
         if self.reasoning_enabled:
@@ -65,11 +66,47 @@ class OllamaProvider(BaseProvider):
         """
         Check if current model supports reasoning mode.
 
+        Uses programmatic detection by checking the model's template for reasoning
+        logic. Falls back to a hardcoded list if the API call fails.
+
         Returns:
             bool: True if model supports reasoning, False otherwise
         """
-        model_lower = self.model.lower()
-        return any(name in model_lower for name in self.reasoning_models)
+        # Return cached result if available
+        if self._reasoning_support_cache is not None:
+            return self._reasoning_support_cache
+
+        try:
+            # Get model information from Ollama
+            logger.debug(f"Checking reasoning support for model: {self.model}")
+            response = self.client.show(self.model)
+            template = response.get("template", "")
+
+            # Check if template contains reasoning logic
+            # Models with reasoning support have IsThinkSet or .Thinking in their template
+            supports_reasoning = "IsThinkSet" in template or ".Thinking" in template
+
+            logger.info(f"Model {self.model} reasoning support: {supports_reasoning} (detected programmatically)")
+            self._reasoning_support_cache = supports_reasoning
+            return supports_reasoning
+
+        except Exception as e:
+            logger.warning(f"Failed to detect reasoning support programmatically: {e}")
+            logger.warning("Falling back to hardcoded model list")
+
+            # Fallback to expanded hardcoded list if API call fails
+            reasoning_models = [
+                "qwen3", "qwen2.5",
+                "deepseek-r1", "deepseek-v3",
+                "qwq",
+                "smallthinker",
+                "gpt-oss",
+                "magistral"
+            ]
+            supports_reasoning = any(name in self.model.lower() for name in reasoning_models)
+            logger.info(f"Model {self.model} reasoning support: {supports_reasoning} (fallback detection)")
+            self._reasoning_support_cache = supports_reasoning
+            return supports_reasoning
 
     def _strip_thinking_tags(self, text: str) -> str:
         """

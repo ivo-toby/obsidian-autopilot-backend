@@ -61,15 +61,58 @@ class TestOllamaProviderReasoning(unittest.TestCase):
 
     @patch('services.providers.ollama_provider.ollama.Client')
     def test_is_reasoning_model_detection(self, mock_client_class):
-        """Test reasoning model detection."""
+        """Test reasoning model detection using programmatic template checking."""
+        # Template with reasoning support (contains IsThinkSet or .Thinking)
+        reasoning_template = """{{- if .IsThinkSet }}
+{{- if .Thinking }}
+<think>{{ .Thinking }}</think>
+{{- end }}
+{{- end }}"""
+
+        # Template without reasoning support
+        no_reasoning_template = """{{- range .Messages }}
+{{ .Content }}
+{{- end }}"""
+
         test_cases = [
-            ("qwen3:14b", True),
-            ("qwen2.5:7b", True),
-            ("deepseek-r1:8b", True),
-            ("qwq:32b", True),
-            ("smallthinker:1b", True),
-            ("llama3.2:3b", False),
-            ("mistral:7b", False),
+            ("qwen3:14b", reasoning_template, True),
+            ("deepseek-r1:8b", reasoning_template, True),
+            ("gpt-oss:20b", reasoning_template, True),
+            ("magistral:24b", reasoning_template, True),
+            ("llama3.2:3b", no_reasoning_template, False),
+            ("mistral:7b", no_reasoning_template, False),
+        ]
+
+        for model, template, expected in test_cases:
+            config = self.base_config.copy()
+            config["inference"]["ollama"]["model"] = model
+
+            # Mock the client.show() response
+            mock_instance = Mock()
+            mock_instance.show.return_value = {"template": template}
+            mock_client_class.return_value = mock_instance
+
+            provider = OllamaProvider(config)
+
+            self.assertEqual(
+                provider._is_reasoning_model(),
+                expected,
+                f"Model {model} should {'support' if expected else 'not support'} reasoning"
+            )
+
+    @patch('services.providers.ollama_provider.ollama.Client')
+    def test_is_reasoning_model_fallback(self, mock_client_class):
+        """Test reasoning model detection fallback when API call fails."""
+        # Mock client.show() to raise an exception
+        mock_instance = Mock()
+        mock_instance.show.side_effect = Exception("API error")
+        mock_client_class.return_value = mock_instance
+
+        test_cases = [
+            ("qwen3:14b", True),  # In fallback list
+            ("gpt-oss:20b", True),  # In fallback list
+            ("deepseek-r1:8b", True),  # In fallback list
+            ("llama3.2:3b", False),  # Not in fallback list
         ]
 
         for model, expected in test_cases:
@@ -80,8 +123,28 @@ class TestOllamaProviderReasoning(unittest.TestCase):
             self.assertEqual(
                 provider._is_reasoning_model(),
                 expected,
-                f"Model {model} should {'support' if expected else 'not support'} reasoning"
+                f"Model {model} should {'support' if expected else 'not support'} reasoning (fallback)"
             )
+
+    @patch('services.providers.ollama_provider.ollama.Client')
+    def test_is_reasoning_model_caching(self, mock_client_class):
+        """Test that reasoning model detection is cached."""
+        mock_instance = Mock()
+        mock_instance.show.return_value = {"template": "{{- if .IsThinkSet }}thinking{{- end }}"}
+        mock_client_class.return_value = mock_instance
+
+        config = self.base_config.copy()
+        config["inference"]["ollama"]["model"] = "qwen3:14b"
+        provider = OllamaProvider(config)
+
+        # Call twice
+        result1 = provider._is_reasoning_model()
+        result2 = provider._is_reasoning_model()
+
+        # Should only call show() once due to caching
+        self.assertEqual(mock_instance.show.call_count, 1)
+        self.assertEqual(result1, result2)
+        self.assertTrue(result1)
 
     @patch('services.providers.ollama_provider.ollama.Client')
     def test_strip_thinking_tags(self, mock_client_class):
@@ -177,6 +240,11 @@ class TestOllamaProviderReasoning(unittest.TestCase):
         config = self.base_config.copy()
         config["inference"]["ollama"]["reasoning"]["enabled"] = True
 
+        # Mock client.show() to return a reasoning template
+        mock_instance = MagicMock()
+        mock_instance.show.return_value = {"template": "{{- if .IsThinkSet }}reasoning{{- end }}"}
+        mock_client_class.return_value = mock_instance
+
         provider = OllamaProvider(config)
 
         # Mock the client.chat response
@@ -205,6 +273,11 @@ class TestOllamaProviderReasoning(unittest.TestCase):
         # Config has reasoning disabled
         config = self.base_config.copy()
         config["inference"]["ollama"]["reasoning"]["enabled"] = False
+
+        # Mock client.show() to return a reasoning template
+        mock_instance = MagicMock()
+        mock_instance.show.return_value = {"template": "{{- if .IsThinkSet }}reasoning{{- end }}"}
+        mock_client_class.return_value = mock_instance
 
         provider = OllamaProvider(config)
 
@@ -253,6 +326,11 @@ class TestOllamaProviderReasoning(unittest.TestCase):
         config = self.base_config.copy()
         config["inference"]["ollama"]["reasoning"]["enabled"] = True
 
+        # Mock client.show() to return a reasoning template
+        mock_instance = MagicMock()
+        mock_instance.show.return_value = {"template": "{{- if .IsThinkSet }}reasoning{{- end }}"}
+        mock_client_class.return_value = mock_instance
+
         provider = OllamaProvider(config)
 
         mock_response = {
@@ -284,6 +362,11 @@ class TestOllamaProviderReasoning(unittest.TestCase):
         config = self.base_config.copy()
         config["inference"]["ollama"]["model"] = "qwen3:14b"  # Reasoning model
         config["inference"]["ollama"]["reasoning"]["enabled"] = False
+
+        # Mock client.show() to return a reasoning template
+        mock_instance = MagicMock()
+        mock_instance.show.return_value = {"template": "{{- if .IsThinkSet }}reasoning{{- end }}"}
+        mock_client_class.return_value = mock_instance
 
         provider = OllamaProvider(config)
 
