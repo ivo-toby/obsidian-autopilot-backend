@@ -1,8 +1,13 @@
 applescript==2021.2.9
 openai==1.63.0
+ollama>=0.1.0
 PyYAML==6.0.1
 scikit_learn==1.5.1
 chromadb==0.4.24
 tqdm==4.66.2
 numpy<2.0.0  # Pin numpy to version before 2.0
 pyperclip==1.8.2
+
+# Testing
+pytest>=7.0.0
+pytest-cov>=4.0.0

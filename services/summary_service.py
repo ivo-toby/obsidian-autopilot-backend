@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
 from services.notes_service import NotesService
-from services.openai_service import OpenAIService
+from services.llm_service import LLMService
 from services.reminder_service import ReminderService
 from utils.date_utils import get_date_str
 from utils.file_handler import create_output_dir, write_summary_to_file
@@ -27,9 +27,7 @@ class SummaryService:
         """
         self.config = config
         self.notes_service = NotesService(config["daily_notes_file"])
-        self.openai_service = OpenAIService(
-            api_key=config["api_key"], model=config["model"], base_url=config.get("base_url")
-        )
+        self.llm_service = LLMService(config)
 
     def get_all_notes(self) -> List[Dict[str, str]]:
         """
@@ -140,7 +138,7 @@ class SummaryService:
             print("No notes found for today.")
             return
 
-        result = self.openai_service.summarize_notes_and_identify_tasks(today_notes)
+        result = self.llm_service.summarize_notes_and_identify_tasks(today_notes)
         summary = result.get("summary", "No summary available")
         tasks = result.get("actionable_items", [])
         tags = result.get("tags", [])
@@ -179,7 +177,7 @@ class SummaryService:
             print("No notes found for the past week.")
             return
 
-        weekly_summary = self.openai_service.generate_weekly_summary(weekly_notes)
+        weekly_summary = self.llm_service.generate_weekly_summary(weekly_notes)
         self._display_results(weekly_summary, [], [])
 
         if not dry_run:

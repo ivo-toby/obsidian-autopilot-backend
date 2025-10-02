@@ -34,18 +34,27 @@ def load_config(config_file: str) -> dict:
             if config is None:
                 raise ValueError(f"Empty configuration file: {config_file}")
 
-            # Validate required fields
+            # Validate required fields (note: api_key and model are now optional)
             required_fields = [
                 "daily_notes_file",
                 "daily_output_dir",
                 "weekly_output_dir",
                 "notes_base_dir",
-                "api_key",
-                "model"
             ]
             for field in required_fields:
                 if field not in config:
                     raise KeyError(f"Required field missing in config: {field}")
+
+            # Validate LLM configuration (either legacy or new format)
+            has_legacy_config = "api_key" in config and "model" in config
+            has_inference_config = "inference" in config and "provider" in config.get("inference", {})
+
+            if not has_legacy_config and not has_inference_config:
+                raise KeyError(
+                    "Missing LLM configuration. Please provide either:\n"
+                    "  - New format: inference.provider and inference.openai/ollama settings, OR\n"
+                    "  - Legacy format: api_key and model"
+                )
 
             return config
     except FileNotFoundError:

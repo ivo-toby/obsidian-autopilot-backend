@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(pytest:*)",
+      "Bash(python -m pytest tests/test_config_without_legacy_keys.py -v)",
+      "Bash(ollama list:*)",
+      "WebSearch",
+      "WebFetch(domain:ollama.com)",
+      "Bash(python -m pytest tests/services/providers/test_ollama_provider.py -v)",
+      "Bash(python -m unittest:*)",
+      "Bash(python -m pytest --no-cov -v)",
+      "Bash(python -m pytest tests/services/test_link_service.py::test_analysis_state_persistence -v --no-cov)",
+      "Bash(python -m pytest --no-cov -q)",
+      "Bash(git reset:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

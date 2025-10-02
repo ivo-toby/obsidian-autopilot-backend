@@ -4,6 +4,15 @@
 
 A Python tool for processing and enriching your Obsidian notes, providing automatic summarization, task extraction, and semantic knowledge base features.
 
+## Recent Updates
+
+**Automatic Capability Detection (Latest)**
+- Ollama models now automatically detect tool calling and reasoning capabilities via programmatic inspection
+- No more hardcoded model lists - capabilities are detected by examining model templates through Ollama's API
+- Reasoning mode support automatically detected for models like Qwen3, DeepSeek-R1, QwQ, GPT-OSS, and others
+- Tool calling support automatically detected for compatible models
+- Falls back to known model lists if API detection fails
+
 ## Key Features
 
 - **Note Processing**
@@ -106,10 +115,23 @@ For complete local AI processing without external API calls:
 3. **Configure for Ollama**:
 
    ```yaml
-   # Text generation settings
-   api_key: "dummy" # Ollama doesn't require a real API key
-   model: "llama3.2" # or llama3.1, codellama, etc.
-   base_url: "http://localhost:11434/v1"
+   # LLM Inference Configuration
+   inference:
+     provider: "ollama"
+
+     ollama:
+       base_url: "http://localhost:11434"
+       model: "llama3.2"  # or qwen3, deepseek-r1, mistral, etc.
+       temperature: 0.7
+       num_ctx: 8192
+       num_thread: 4
+       timeout: 120
+
+       # Reasoning mode (automatically detected for compatible models)
+       reasoning:
+         enabled: false        # Enable for reasoning-capable models
+         save_thinking: false  # Include thinking process in outputs
+         log_thinking: false   # Log thinking content for debugging
 
    # Embedding settings
    embeddings:
@@ -125,6 +147,33 @@ For complete local AI processing without external API calls:
    ```
 
 This setup provides complete privacy and offline functionality for all AI operations.
+
+### Reasoning Mode (Advanced)
+
+Some Ollama models support reasoning mode, which enables chain-of-thought processing:
+
+1. **Supported models** (automatically detected):
+   - Qwen3, Qwen2.5
+   - DeepSeek-R1, DeepSeek-V3
+   - QwQ, Smallthinker
+   - GPT-OSS, Magistral
+   - And any other model with reasoning template markers
+
+2. **Enable reasoning mode**:
+   ```yaml
+   inference:
+     ollama:
+       reasoning:
+         enabled: true         # Enable reasoning mode
+         save_thinking: true   # Include thinking process in saved outputs
+         log_thinking: false   # Enable for debugging thinking content
+   ```
+
+3. **How it works**:
+   - Models with reasoning support automatically use extended thinking
+   - Thinking tokens can be saved or suppressed based on configuration
+   - Tool calling works seamlessly with reasoning mode
+   - Capabilities are auto-detected via Ollama's API
 
 ## CLI Reference
 
@@ -295,15 +344,30 @@ meeting_notes_output_dir: "~/Documents/notes/meetingnotes"
 learnings_file: "~/Documents/notes/learnings/learnings.md"
 learnings_output_dir: "~/Documents/notes/learnings"
 
-# OpenAI settings (for text generation)
-api_key: "your-api-key"
-model: "gpt-4o"
-base_url: "https://api.openai.com/v1" # Optional: defaults to OpenAI API
+# LLM Inference Configuration
+inference:
+  provider: "openai"  # Options: "openai" | "ollama"
 
-# Alternative: Use Ollama for text generation
-# api_key: "dummy"  # Ollama doesn't require a real API key
-# model: "llama3.2"  # or any model you have in Ollama
-# base_url: "http://localhost:11434/v1"
+  # OpenAI-specific settings
+  openai:
+    api_key: "your-api-key"
+    model: "gpt-4o"
+    base_url: "https://api.openai.com/v1"  # Optional: for OpenAI-compatible APIs
+
+  # Ollama-specific settings
+  ollama:
+    base_url: "http://localhost:11434"
+    model: "llama3.2"  # or qwen3, deepseek-r1, mistral, etc.
+    temperature: 0.7
+    num_ctx: 8192
+    num_thread: 4
+    timeout: 120
+
+    # Reasoning mode (auto-detected for compatible models)
+    reasoning:
+      enabled: false        # Enable for reasoning-capable models
+      save_thinking: false  # Include thinking process in outputs
+      log_thinking: false   # Log thinking content for debugging
 
 # Embedding configuration (recommended local setup)
 embeddings:

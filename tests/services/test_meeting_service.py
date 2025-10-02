@@ -46,28 +46,28 @@ def sample_meeting_data():
 
 
 @pytest.fixture
-def mock_openai_service():
-    """Create a mock OpenAI service."""
-    with patch("services.meeting_service.OpenAIService") as mock:
+def mock_llm_service():
+    """Create a mock LLM service."""
+    with patch("services.meeting_service.LLMService") as mock:
         mock_instance = Mock()
         mock.return_value = mock_instance
         yield mock_instance
 
 
 @pytest.fixture
-def meeting_service(sample_config, temp_dir, mock_openai_service):
+def meeting_service(sample_config, temp_dir, mock_llm_service):
     """Create a MeetingService instance with temporary directories."""
     config = sample_config.copy()
     config["meeting_notes_output_dir"] = str(temp_dir)
     return MeetingService(config)
 
 
-def test_init_meeting_service(sample_config, mock_openai_service):
+def test_init_meeting_service(sample_config, mock_llm_service):
     """Test meeting service initialization."""
     service = MeetingService(sample_config)
     assert service.config == sample_config
     assert service.notes_service is not None
-    assert service.openai_service is not None
+    assert service.llm_service is not None
 
 
 def test_save_meeting_notes(meeting_service, sample_meeting_data, temp_dir):
@@ -112,7 +112,7 @@ def test_process_meeting_notes(meeting_service, sample_meeting_data):
     meeting_service.notes_service.extract_today_notes = Mock(return_value=mock_notes)
 
     mock_meeting_notes = {"meetings": [sample_meeting_data]}
-    meeting_service.openai_service.generate_meeting_notes = Mock(return_value=mock_meeting_notes)
+    meeting_service.llm_service.generate_meeting_notes = Mock(return_value=mock_meeting_notes)
 
     # Execute
     meeting_service.process_meeting_notes()
@@ -120,7 +120,7 @@ def test_process_meeting_notes(meeting_service, sample_meeting_data):
     # Assert
     meeting_service.notes_service.load_notes.assert_called_once()
     meeting_service.notes_service.extract_today_notes.assert_called_once()
-    meeting_service.openai_service.generate_meeting_notes.assert_called_once_with(mock_notes)
+    meeting_service.llm_service.generate_meeting_notes.assert_called_once_with(mock_notes)
 
 
 def test_process_meeting_notes_dry_run(meeting_service, sample_meeting_data, temp_dir):
@@ -131,7 +131,7 @@ def test_process_meeting_notes_dry_run(meeting_service, sample_meeting_data, tem
     meeting_service.notes_service.extract_today_notes = Mock(return_value=mock_notes)
 
     mock_meeting_notes = {"meetings": [sample_meeting_data]}
-    meeting_service.openai_service.generate_meeting_notes = Mock(return_value=mock_meeting_notes)
+    meeting_service.llm_service.generate_meeting_notes = Mock(return_value=mock_meeting_notes)
 
     # Execute
     meeting_service.process_meeting_notes(dry_run=True)
@@ -153,7 +153,7 @@ def test_process_meeting_notes_no_notes(meeting_service):
     # Assert
     meeting_service.notes_service.load_notes.assert_called_once()
     meeting_service.notes_service.extract_today_notes.assert_called_once()
-    meeting_service.openai_service.generate_meeting_notes.assert_not_called()
+    meeting_service.llm_service.generate_meeting_notes.assert_not_called()
 
 
 def test_process_meeting_notes_with_date(meeting_service, sample_meeting_data):
@@ -164,7 +164,7 @@ def test_process_meeting_notes_with_date(meeting_service, sample_meeting_data):
     meeting_service.notes_service.extract_today_notes = Mock(return_value=mock_notes)
 
     mock_meeting_notes = {"meetings": [sample_meeting_data]}
-    meeting_service.openai_service.generate_meeting_notes = Mock(return_value=mock_meeting_notes)
+    meeting_service.llm_service.generate_meeting_notes = Mock(return_value=mock_meeting_notes)
 
     test_date = "2024-02-18"
 
@@ -182,7 +182,7 @@ def test_process_meeting_transcript_writes_file(meeting_service, temp_dir, monke
     import services.meeting_service as ms
     monkeypatch.setattr(ms.pyperclip, "paste", lambda: "dummy transcript")
     # Monkey-patch the LLM call
-    meeting_service.openai_service.generate_text = Mock(return_value=sample_summary)
+    meeting_service.llm_service.generate_text = Mock(return_value=sample_summary)
     # Mock the topic inference to return a known value
     meeting_service._infer_topic_from_summary = Mock(return_value="team_sync")
 
@@ -201,7 +201,7 @@ def test_process_meeting_transcript_dry_run_prints(meeting_service, capsys, monk
     sample_summary = "# [Team Sync]\nThis is a summary."
     import services.meeting_service as ms
     monkeypatch.setattr(ms.pyperclip, "paste", lambda: "dummy transcript")
-    meeting_service.openai_service.generate_text = Mock(return_value=sample_summary)
+    meeting_service.llm_service.generate_text = Mock(return_value=sample_summary)
     # Mock the topic inference to return a known value
     meeting_service._infer_topic_from_summary = Mock(return_value="team_sync")
 
@@ -233,7 +233,7 @@ def test_process_meeting_transcript_with_custom_prompt(meeting_service, temp_dir
         assert prompt == expected_prompt
         return "# [Custom Meeting]\nSummary from custom prompt."
 
-    meeting_service.openai_service.generate_text = Mock(side_effect=check_prompt)
+    meeting_service.llm_service.generate_text = Mock(side_effect=check_prompt)
 
     # Mock the topic inference to return a known value
     meeting_service._infer_topic_from_summary = Mock(return_value="custom_meeting")
@@ -246,7 +246,7 @@ def test_process_meeting_transcript_with_custom_prompt(meeting_service, temp_dir
     )
 
     # Assert correct prompt was used
-    meeting_service.openai_service.generate_text.assert_called_once()
+    meeting_service.llm_service.generate_text.assert_called_once()
 
     # Assert file was created with correct content
     expected_filename = "2024-03-01_custom_meeting.md"
@@ -259,25 +259,25 @@ def test_infer_topic_from_summary(meeting_service):
     """Test inferring topic from a meeting summary."""
     # Test with a proper markdown heading
     summary_with_heading = "# [Team Sync]\nThis is a team sync meeting summary."
-    meeting_service.openai_service.generate_text = Mock(return_value="Team Collaboration Discussion")
+    meeting_service.llm_service.generate_text = Mock(return_value="Team Collaboration Discussion")
 
     topic = meeting_service._infer_topic_from_summary(summary_with_heading)
     assert topic == "team_collaboration_discussion"
 
     # Test fallback when LLM fails
-    meeting_service.openai_service.generate_text = Mock(side_effect=Exception("API error"))
+    meeting_service.llm_service.generate_text = Mock(side_effect=Exception("API error"))
     topic = meeting_service._infer_topic_from_summary(summary_with_heading)
     assert topic == "team_sync"
 
     # Test with no markdown heading
     summary_without_heading = "This is a meeting summary without a proper heading."
-    meeting_service.openai_service.generate_text = Mock(return_value="Project Status Update")
+    meeting_service.llm_service.generate_text = Mock(return_value="Project Status Update")
 
     topic = meeting_service._infer_topic_from_summary(summary_without_heading)
     assert topic == "project_status_update"
 
     # Test fallback to default when no heading and LLM fails
-    meeting_service.openai_service.generate_text = Mock(side_effect=Exception("API error"))
+    meeting_service.llm_service.generate_text = Mock(side_effect=Exception("API error"))
     topic = meeting_service._infer_topic_from_summary(summary_without_heading)
     assert topic == "meeting"
 

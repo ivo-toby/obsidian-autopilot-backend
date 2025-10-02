@@ -9,7 +9,7 @@ import os
 import re
 from typing import List, Tuple
 
-from services.openai_service import OpenAIService
+from services.llm_service import LLMService
 from utils.file_handler import load_notes, write_summary_to_file
 
 
@@ -93,7 +93,7 @@ class LearningService:
         write_summary_to_file(file_path, content)
         return filename
 
-    def process_new_learnings(self, openai_service: OpenAIService) -> None:
+    def process_new_learnings(self, llm_service: LLMService) -> None:
         """
         Process all new learning entries.
 
@@ -101,7 +101,7 @@ class LearningService:
         markdown files, and removes processed entries from the source file.
 
         Args:
-            openai_service (OpenAIService): Service for AI-powered text generation
+            llm_service (LLMService): Service for AI-powered text generation
 
         Returns:
             None
@@ -112,9 +112,9 @@ class LearningService:
         print(f"Processing {len(learnings)} learnings...")
         for full_match, timestamp, learning in learnings:
             print(f"Processing learning: {learning[:100]}...")
-            title = openai_service.generate_learning_title(learning)
+            title = llm_service.generate_learning_title(learning)
             print(f"Title: {title}")
-            tags = openai_service.generate_learning_tags(learning)
+            tags = llm_service.generate_learning_tags(learning)
             print(f"Tags: {tags}")
 
             self.generate_markdown_file(timestamp, learning, title, tags)

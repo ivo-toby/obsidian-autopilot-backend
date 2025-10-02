@@ -2,15 +2,50 @@ daily_notes_file: "~/Documents/notes/jrnl/daily.md"
 daily_output_dir: "~/Documents/notes/daily"
 weekly_output_dir: "~/Documents/notes/Weekly"
 meeting_notes_output_dir: "~/Documents/notes/meetingnotes"
-base_url: "https://api.openai.com/v1/"
-api_key: ""
-reminders_list: ""
-model: "gpt-4o"
-chunking_model: "gpt-4o-mini"
 learnings_file: "~/Documents/notes/jrnl/learnings.md"
 learnings_output_dir: "~/Documents/notes/learnings"
+reminders_list: ""
 
 notes_base_dir: "~/Documents/notes" # Base directory for all notes
+
+# LLM Inference Configuration
+inference:
+  provider: "openai"  # Options: "openai" | "ollama"
+
+  # OpenAI-specific settings (used when provider=openai)
+  openai:
+    api_key: ""  # Set via environment variable or directly
+    base_url: "https://api.openai.com/v1"  # Optional, for OpenAI-compatible APIs
+    model: "gpt-4o"  # Model to use with OpenAI
+
+  # Ollama-specific settings (used when provider=ollama)
+  # NOTE: Tool calling and reasoning support are automatically detected
+  # by inspecting model templates via Ollama's API - no manual configuration needed!
+  ollama:
+    base_url: "http://localhost:11434"
+    model: "llama3.2"  # Model to use with Ollama
+    temperature: 0.7
+    num_ctx: 8192      # Context window
+    num_thread: 4      # Number of threads
+    timeout: 120       # Request timeout in seconds
+
+    # Reasoning mode settings (automatically detected for compatible models)
+    # Supported models include: Qwen3, Qwen2.5, DeepSeek-R1, DeepSeek-V3,
+    # QwQ, Smallthinker, GPT-OSS, Magistral, and others with reasoning templates
+    reasoning:
+      enabled: false        # Global toggle for reasoning mode
+      save_thinking: false  # Whether to include thinking tokens in saved outputs
+      log_thinking: false   # Whether to log thinking content (for debugging)
+      # NOTE: Reasoning support is automatically detected via Ollama's API
+      # by checking model templates for reasoning markers (IsThinkSet, .Thinking)
+      # No need to manually specify models - detection is programmatic!
+
+# Deprecated settings (kept for backward compatibility)
+# These keys are OPTIONAL - the 'inference' section above is now preferred
+# You can safely remove these lines if you're using the inference configuration
+# api_key: ""
+# model: "gpt-4o"
+# base_url: "https://api.openai.com/v1/"
 
 # Knowledge base settings
 knowledge_base:
