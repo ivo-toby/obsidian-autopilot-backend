@@ -12,7 +12,8 @@
       "Bash(python -m unittest:*)",
       "Bash(python -m pytest --no-cov -v)",
       "Bash(python -m pytest tests/services/test_link_service.py::test_analysis_state_persistence -v --no-cov)",
-      "Bash(python -m pytest --no-cov -q)"
+      "Bash(python -m pytest --no-cov -q)",
+      "Bash(git reset:*)"
     ],
     "deny": [],
     "ask": []
