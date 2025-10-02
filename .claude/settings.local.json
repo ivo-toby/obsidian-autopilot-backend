@@ -7,7 +7,9 @@
       "Bash(python -m pytest tests/test_config_without_legacy_keys.py -v)",
       "Bash(ollama list:*)",
       "WebSearch",
-      "WebFetch(domain:ollama.com)"
+      "WebFetch(domain:ollama.com)",
+      "Bash(python -m pytest tests/services/providers/test_ollama_provider.py -v)",
+      "Bash(python -m unittest:*)"
     ],
     "deny": [],
     "ask": []
