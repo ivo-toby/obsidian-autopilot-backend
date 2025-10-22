@@ -767,6 +767,86 @@ class VectorStoreService:
         sample_text = "Sample text to determine embedding dimensions"
         sample_embedding = self.embedding_service.embed_text(sample_text)
         return len(sample_embedding)
+
+    @staticmethod
+    def compute_content_hash(content: str, algorithm: str = "sha256") -> str:
+        """
+        Compute cryptographic hash of content.
+
+        Args:
+            content: Document content to hash
+            algorithm: Hash algorithm (default: sha256)
+
+        Returns:
+            Hex-encoded hash string
+        """
+        import hashlib
+        hasher = hashlib.new(algorithm)
+        hasher.update(content.encode('utf-8'))
+        return hasher.hexdigest()
+
+    def get_document_metadata(self, doc_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve stored metadata for a document.
+
+        Args:
+            doc_id: Document identifier
+
+        Returns:
+            Metadata dict if found, None otherwise
+        """
+        try:
+            # Query ChromaDB metadata collection for document by ID
+            results = self.collections["metadata"].get(
+                ids=[doc_id],
+                include=["metadatas"]
+            )
+
+            if not results["ids"]:
+                logger.debug(f"No metadata found for document: {doc_id}")
+                return None
+
+            metadata = results["metadatas"][0]
+            logger.debug(f"Retrieved metadata for {doc_id}: {metadata}")
+            return metadata
+
+        except Exception as e:
+            logger.error(f"Error retrieving metadata for {doc_id}: {str(e)}")
+            return None
+
+    def has_content_changed(self, doc_id: str, content: str) -> bool:
+        """
+        Check if document content has changed since last indexing.
+
+        Args:
+            doc_id: Document identifier
+            content: Current document content
+
+        Returns:
+            True if content has changed or document not indexed
+        """
+        stored_metadata = self.get_document_metadata(doc_id)
+        if not stored_metadata:
+            logger.debug(f"Document {doc_id} not indexed yet")
+            return True  # Not indexed yet
+
+        stored_hash = stored_metadata.get("content_hash")
+        if not stored_hash:
+            logger.debug(f"Document {doc_id} has no stored hash (legacy entry)")
+            return True  # Legacy entry without hash
+
+        current_hash = self.compute_content_hash(content)
+        changed = current_hash != stored_hash
+
+        if changed:
+            logger.debug(
+                f"Content changed for {doc_id}: "
+                f"{stored_hash[:8]}... -> {current_hash[:8]}..."
+            )
+        else:
+            logger.debug(f"Content unchanged for {doc_id}: {current_hash[:8]}...")
+
+        return changed
         
     def debug_store_contents(self) -> Dict[str, Any]:
         """
