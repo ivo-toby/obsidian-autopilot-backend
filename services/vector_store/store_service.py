@@ -177,15 +177,31 @@ class VectorStoreService:
         # Store link relationships
         self._store_link_relationships(doc_id, chunks, metadata)
 
-        # Update document metadata
+        # Update document metadata with content hash
         if metadata and "modified_time" in metadata:
             try:
+                # Prepare metadata entry
+                metadata_entry = {
+                    "modified_time": metadata["modified_time"]
+                }
+
+                # Compute and store content hash if content is available
+                content = metadata.get("content", "")
+                if content:
+                    metadata_entry["content_hash"] = self.compute_content_hash(content)
+                    metadata_entry["hash_algorithm"] = "sha256"
+                    metadata_entry["indexed_at"] = time.time()
+                    logger.debug(
+                        f"Computed content hash for {doc_id}: "
+                        f"{metadata_entry['content_hash'][:8]}..."
+                    )
+
                 self._batch_upsert(
                     self.collections["metadata"],
                     [doc_id],
                     [[1.0] * self.embedding_dims],
                     [""],
-                    [{"modified_time": metadata["modified_time"]}],
+                    [metadata_entry],
                 )
             except Exception as e:
                 logger.error(f"Error updating metadata for {doc_id}: {str(e)}")
