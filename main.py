@@ -140,6 +140,44 @@ def process_knowledge_base(cfg, cli_args):
                     f"Updated last_update timestamp to {datetime.fromtimestamp(current_time)}"
                 )
 
+        elif cli_args.rehash_all:
+            logger.info("Rehashing all indexed documents...")
+
+            # Get all indexed document IDs
+            doc_ids = vector_store.get_all_indexed_doc_ids()
+            logger.info(f"Found {len(doc_ids)} indexed documents")
+
+            if not doc_ids:
+                logger.info("No documents found in vector store")
+                return
+
+            # Get all notes to map doc_id to content
+            all_notes = summary_service.get_all_notes()
+            notes_by_id = {note["id"]: note for note in all_notes}
+
+            # Rehash each document
+            updated_count = 0
+            skipped_count = 0
+            error_count = 0
+
+            for doc_id in doc_ids:
+                note = notes_by_id.get(doc_id)
+                if not note:
+                    logger.warning(f"Note not found in vault: {doc_id}")
+                    error_count += 1
+                    continue
+
+                if vector_store.rehash_document(doc_id, note["content"]):
+                    updated_count += 1
+                else:
+                    skipped_count += 1
+
+            logger.info(
+                f"Rehashing complete: {updated_count} updated, "
+                f"{skipped_count} skipped (already have hash), "
+                f"{error_count} errors"
+            )
+
         elif cli_args.reindex or cli_args.update:
             if cli_args.reindex:
                 logger.info("Reindexing all notes...")

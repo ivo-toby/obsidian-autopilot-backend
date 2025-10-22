@@ -86,6 +86,11 @@ def setup_argparser() -> argparse.ArgumentParser:
         help="Check content hash for all notes, ignoring mtime (useful after migration or cloud sync)",
     )
     kb_parser.add_argument(
+        "--rehash-all",
+        action="store_true",
+        help="Recompute and store content hashes for all indexed documents without re-embedding",
+    )
+    kb_parser.add_argument(
         "--query", type=str, help="Search for similar content in the vector store"
     )
     kb_parser.add_argument(

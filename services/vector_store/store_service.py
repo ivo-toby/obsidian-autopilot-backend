@@ -863,6 +863,68 @@ class VectorStoreService:
             logger.debug(f"Content unchanged for {doc_id}: {current_hash[:8]}...")
 
         return changed
+
+    def rehash_document(self, doc_id: str, content: str) -> bool:
+        """
+        Recompute and store content hash for a document without re-embedding.
+
+        Args:
+            doc_id: Document identifier
+            content: Current document content
+
+        Returns:
+            True if hash was updated, False otherwise
+        """
+        try:
+            # Get existing metadata
+            stored_metadata = self.get_document_metadata(doc_id)
+            if not stored_metadata:
+                logger.warning(f"Document {doc_id} not found in metadata collection")
+                return False
+
+            # Check if hash already exists
+            if stored_metadata.get("content_hash"):
+                logger.debug(f"Document {doc_id} already has hash, skipping")
+                return False
+
+            # Compute and store hash
+            content_hash = self.compute_content_hash(content)
+            metadata_entry = {
+                **stored_metadata,
+                "content_hash": content_hash,
+                "hash_algorithm": "sha256",
+                "indexed_at": time.time()
+            }
+
+            # Update metadata without touching embeddings
+            self._batch_upsert(
+                self.collections["metadata"],
+                [doc_id],
+                [[1.0] * self.embedding_dims],
+                [""],
+                [metadata_entry],
+            )
+
+            logger.info(f"Updated hash for {doc_id}: {content_hash[:8]}...")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error rehashing document {doc_id}: {str(e)}")
+            return False
+
+    def get_all_indexed_doc_ids(self) -> List[str]:
+        """
+        Get list of all document IDs currently in the metadata collection.
+
+        Returns:
+            List of document IDs
+        """
+        try:
+            results = self.collections["metadata"].get(include=[])
+            return results.get("ids", [])
+        except Exception as e:
+            logger.error(f"Error retrieving document IDs: {str(e)}")
+            return []
         
     def debug_store_contents(self) -> Dict[str, Any]:
         """
