@@ -197,28 +197,20 @@ class LLMService:
         Returns:
             Optional[Dict[str, Any]]: Dictionary containing summary, tasks, and tags
         """
-        prompt = f"""
-        Given the provided journal entries, please generate an easy-to-read daily journal in Markdown format, which captures all the knowledge, links, and facts from the journal entries for future reference.
-        Following the summary, enumerate any actionable items identified within the journal entries that are actionable by the owner of the notes.
-        Conclude with a list of relevant tags, formatted in snake-case, that categorize the content or themes of the notes.
+        prompt = f"""Analyze the following journal entries and use the create_meeting_notes function to provide a structured summary.
 
-        Example:
-        Journal entry: "[2024-05-21 02:38:09 PM] The team discussed the upcoming project launch, [focusing on the marketing strategy](http://www.link.com), budget allocations, and the final review of the product design. Tasks were assigned to finalize the promotional materials and secure additional funding."
+Journal entries:
+{notes}
 
-        Summary: "[02:38:09 PM] Discussed upcoming product launch, [marketing strategies](http://www.link.com), budgeting, and product design finalization."
-
-        Actionable Items:
-        1. Finalize promotional materials.
-        2. Secure additional funding.
-
-        Tags: project_launch, marketing_strategy, budget_allocation, product_design
-
-        Journal entries:\\n{notes}"""
+Use the function to extract:
+- summary: An easy-to-read daily summary in Markdown format capturing all knowledge, links, and facts
+- actionable_items: List of tasks or actions identified that are actionable by the note owner
+- tags: Relevant tags in snake_case format that categorize the content themes"""
 
         messages = [
             {
                 "role": "system",
-                "content": "You are a helpful assistant and a genius summarizer.",
+                "content": "You are a helpful assistant that structures information using available tools. Always use the provided function to structure your response.",
             },
             {"role": "user", "content": prompt},
         ]

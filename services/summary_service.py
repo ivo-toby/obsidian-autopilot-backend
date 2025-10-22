@@ -139,6 +139,12 @@ class SummaryService:
             return
 
         result = self.llm_service.summarize_notes_and_identify_tasks(today_notes)
+
+        if result is None:
+            print("Error: Failed to process notes. The LLM did not return a valid response.")
+            print("This may indicate that the model doesn't support function calling properly.")
+            return
+
         summary = result.get("summary", "No summary available")
         tasks = result.get("actionable_items", [])
         tags = result.get("tags", [])
