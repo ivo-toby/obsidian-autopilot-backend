@@ -83,9 +83,30 @@ isort .                  # Import sorting
 
 **Daily Notes Processing** (`main.py:process_daily_notes`):
 1. Reads daily notes file
-2. Generates summary via LLMService (uses configured provider: OpenAI or Ollama)
-3. Extracts tasks and creates Apple Reminders
-4. Saves formatted output
+2. Calls `summarize_notes_and_identify_tasks()` with **function calling** to extract structured data
+3. Returns: `{summary: str, actionable_items: list, tags: list}`
+4. Creates Apple Reminders from actionable items
+5. Saves formatted output to daily notes directory
+
+**Meeting Notes Processing** - Two modes:
+
+1. **From Clipboard** (`main.py notes --from-clipboard`):
+   - Uses **simple text generation** (no function calling)
+   - Reads transcript from clipboard
+   - Applies prompt template from `prompts/MEETING_PROMPT.md`
+   - Returns markdown-formatted meeting notes directly
+   - Saves to meeting notes directory with inferred topic name
+
+2. **From Daily Notes** (`main.py notes --meetingnotes`):
+   - Uses **function calling** to extract structured meeting data
+   - Parses daily notes to identify meeting entries
+   - Returns: `{meetings: [{date, subject, participants, notes, decisions, action_items}]}`
+   - Saves individual markdown files per meeting
+
+**Weekly Summary Processing** (`main.py:process_weekly_notes`):
+- Uses **chat completion** (no function calling)
+- Generates narrative summary of weekly activities
+- Includes accomplishments, learnings, and extracted links
 
 **Knowledge Base Indexing** (`main.py:process_knowledge_base`):
 1. `SummaryService.get_all_notes()` scans vault for markdown files
@@ -193,11 +214,28 @@ The codebase uses a provider abstraction pattern for LLM operations:
 
 ### Ollama Provider
 - Uses **native Ollama Python SDK** (not OpenAI SDK with base_url hack)
-- Two function calling modes:
-  - **Native tools**: For llama3.1+, llama3.2+, mistral models (uses Ollama tools API)
-  - **Structured output fallback**: For older models (uses JSON format with schema prompting)
+- **Automatic tool calling with fallback**:
+  - **Native tools**: For models with tool support (llama3.1+, llama3.2+, mistral, gpt-oss, qwen2+, etc.)
+  - **Automatic fallback**: If native tools don't return function calls, automatically falls back to structured output
+  - **Structured output mode**: Uses JSON format with schema prompting for models without native tool support
+  - **Programmatic detection**: Checks model templates via Ollama API to detect tool calling capability
 - Configurable Ollama-specific options: num_ctx, num_thread, timeout
 - Requires Ollama service running (`ollama serve`)
+
+**Tool Calling Best Practices:**
+- Keep prompts concise and tool-focused - avoid verbose formatting examples
+- Explicitly mention the function name in the prompt when you want it called
+- Use direct, imperative language: "Use the X function to..." rather than "Please generate..."
+- System message should emphasize tool usage: "Always use the provided function to structure your response"
+- Lower temperature (0.3-0.5) improves structured output reliability
+
+**Troubleshooting Tool Calling:**
+If a model with tool support doesn't return function calls:
+1. Check the prompt - remove verbose examples and formatting instructions
+2. Verify the function name matches what's mentioned in the prompt
+3. Ensure the system message emphasizes tool usage
+4. The automatic fallback will handle it, but fixing the prompt is preferred
+5. Check logs with `logging.level: "DEBUG"` in config.yaml for detailed diagnostics
 
 **Reasoning Mode Support:**
 - Supports Ollama's reasoning mode for compatible models (automatically detected)
@@ -230,6 +268,16 @@ The codebase uses a provider abstraction pattern for LLM operations:
 Embeddings use `EmbeddingService` with separate configuration:
 - Embeddings: Set `embeddings.model_type: "ollama"` and `embeddings.model_name: "mxbai-embed-large"`
 - Text generation and embeddings can use different providers/models
+
+### Recent Improvements
+
+**Tool Calling Reliability (2025-10):**
+- **Issue**: Models like gpt-oss:20b were returning text instead of tool calls despite having tool support
+- **Root cause**: Prompts were too instruction-heavy with formatting examples, confusing the model
+- **Fix**: Refactored `summarize_notes_and_identify_tasks()` prompt to be concise and tool-focused
+- **Added**: Automatic fallback from native tools to structured output if tool calls aren't returned
+- **Added**: Defensive error handling in `SummaryService` to prevent crashes on None responses
+- **Result**: All tool-capable models now work reliably, with graceful degradation for edge cases
 
 ### Vector Store Persistence
 - ChromaDB stores embeddings in `vector_store.path` (default: `~/Documents/notes/.vector_store`)

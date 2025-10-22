@@ -16,7 +16,11 @@
       "Bash(git reset:*)",
       "Bash(python -m pytest:*)",
       "Bash(python test_temperature_config.py:*)",
-      "Bash(python main.py:*)"
+      "Bash(python main.py:*)",
+      "Bash(python -c:*)",
+      "Read(//Users/ivo.toby/.vector_store/**)",
+      "Bash(/Users/ivo.toby/.pyenv/shims/python:*)",
+      "Read(//Users/ivo.toby/Documents/**)"
     ],
     "deny": [],
     "ask": []
