@@ -445,5 +445,170 @@ def test_error_handling(vector_store):
             new_embeddings=[[0.1] * 1024]
         )
 
+def test_compute_content_hash():
+    """Test hash computation is deterministic."""
+    content = "# Test Note\n\nSome content"
+    hash1 = VectorStoreService.compute_content_hash(content)
+    hash2 = VectorStoreService.compute_content_hash(content)
+
+    # Same content should produce same hash
+    assert hash1 == hash2
+
+    # SHA-256 produces 64 hex characters
+    assert len(hash1) == 64
+
+    # Hash should be a valid hex string
+    assert all(c in '0123456789abcdef' for c in hash1)
+
+def test_content_hash_sensitivity():
+    """Test hash changes with content."""
+    content1 = "# Test Note"
+    content2 = "# Test Note\n"  # Added newline
+    content3 = "# test note"  # Changed case
+
+    hash1 = VectorStoreService.compute_content_hash(content1)
+    hash2 = VectorStoreService.compute_content_hash(content2)
+    hash3 = VectorStoreService.compute_content_hash(content3)
+
+    # Different content should produce different hashes
+    assert hash1 != hash2
+    assert hash1 != hash3
+    assert hash2 != hash3
+
+def test_content_hash_unicode():
+    """Test hash computation with unicode content."""
+    content = "Test with émojis 🎉 and spëcial çharacters"
+    hash_result = VectorStoreService.compute_content_hash(content)
+
+    # Should handle unicode without errors
+    assert len(hash_result) == 64
+
+    # Same unicode content should be deterministic
+    hash_result2 = VectorStoreService.compute_content_hash(content)
+    assert hash_result == hash_result2
+
+def test_get_document_metadata(vector_store):
+    """Test retrieving document metadata."""
+    doc_id = "test-note"
+
+    # Mock the metadata collection
+    mock_meta_collection = vector_store.collections["metadata"]
+
+    # Case 1: Document exists with metadata
+    expected_metadata = {
+        "modified_time": time.time(),
+        "content_hash": "abc123def456",
+        "hash_algorithm": "sha256"
+    }
+    mock_meta_collection.get.return_value = {
+        "ids": [doc_id],
+        "metadatas": [expected_metadata]
+    }
+
+    result = vector_store.get_document_metadata(doc_id)
+    assert result == expected_metadata
+    mock_meta_collection.get.assert_called_once_with(ids=[doc_id], include=["metadatas"])
+
+    # Case 2: Document doesn't exist
+    mock_meta_collection.reset_mock()
+    mock_meta_collection.get.return_value = {"ids": [], "metadatas": []}
+
+    result = vector_store.get_document_metadata(doc_id)
+    assert result is None
+
+    # Case 3: Error during retrieval
+    mock_meta_collection.reset_mock()
+    mock_meta_collection.get.side_effect = Exception("Database error")
+
+    result = vector_store.get_document_metadata(doc_id)
+    assert result is None
+
+def test_has_content_changed_new_document(vector_store):
+    """Test new documents always marked as changed."""
+    # Mock metadata collection to return no results (document not indexed)
+    mock_meta_collection = vector_store.collections["metadata"]
+    mock_meta_collection.get.return_value = {"ids": [], "metadatas": []}
+
+    assert vector_store.has_content_changed("new-note.md", "Some content") is True
+
+def test_has_content_changed_unchanged(vector_store):
+    """Test unchanged content detected correctly."""
+    doc_id = "test-note"
+    content = "# Test Note\n\nSome content"
+    content_hash = VectorStoreService.compute_content_hash(content)
+
+    # Mock metadata collection to return existing hash
+    mock_meta_collection = vector_store.collections["metadata"]
+    mock_meta_collection.get.return_value = {
+        "ids": [doc_id],
+        "metadatas": [{
+            "modified_time": time.time(),
+            "content_hash": content_hash,
+            "hash_algorithm": "sha256"
+        }]
+    }
+
+    # Same content should return False (not changed)
+    assert vector_store.has_content_changed(doc_id, content) is False
+
+def test_has_content_changed_modified(vector_store):
+    """Test modified content detected correctly."""
+    doc_id = "test-note"
+    old_content = "# Test Note\n\nOriginal content"
+    new_content = "# Test Note\n\nModified content"
+    old_hash = VectorStoreService.compute_content_hash(old_content)
+
+    # Mock metadata collection to return old hash
+    mock_meta_collection = vector_store.collections["metadata"]
+    mock_meta_collection.get.return_value = {
+        "ids": [doc_id],
+        "metadatas": [{
+            "modified_time": time.time(),
+            "content_hash": old_hash,
+            "hash_algorithm": "sha256"
+        }]
+    }
+
+    # Different content should return True (changed)
+    assert vector_store.has_content_changed(doc_id, new_content) is True
+
+def test_legacy_entries_without_hash(vector_store):
+    """Test backward compatibility with entries lacking content_hash."""
+    doc_id = "legacy-note"
+
+    # Mock metadata collection to return entry without content_hash
+    mock_meta_collection = vector_store.collections["metadata"]
+    mock_meta_collection.get.return_value = {
+        "ids": [doc_id],
+        "metadatas": [{
+            "modified_time": time.time()
+            # No content_hash field
+        }]
+    }
+
+    # Legacy entries without hash should be marked as changed
+    assert vector_store.has_content_changed(doc_id, "Any content") is True
+
+def test_has_content_changed_empty_content(vector_store):
+    """Test hash detection with empty content."""
+    doc_id = "empty-note"
+    empty_content = ""
+    empty_hash = VectorStoreService.compute_content_hash(empty_content)
+
+    # Mock metadata collection
+    mock_meta_collection = vector_store.collections["metadata"]
+    mock_meta_collection.get.return_value = {
+        "ids": [doc_id],
+        "metadatas": [{
+            "content_hash": empty_hash
+        }]
+    }
+
+    # Empty content should match
+    assert vector_store.has_content_changed(doc_id, empty_content) is False
+
+    # Non-empty content should not match
+    assert vector_store.has_content_changed(doc_id, "Now has content") is True
+
 if __name__ == "__main__":
     pytest.main([__file__])
