@@ -277,8 +277,17 @@ class OllamaProvider(BaseProvider):
             supports_tools = self._model_supports_tools()
 
             if supports_tools:
-                return self._chat_with_native_tools(messages, functions, function_call, **kwargs)
+                logger.info(f"Attempting native tool calling for model: {self.model}")
+                result = self._chat_with_native_tools(messages, functions, function_call, **kwargs)
+
+                # If native tools didn't produce a function call, fallback to structured output
+                if result is None or "function_call" not in result:
+                    logger.warning(f"Native tool calling failed for {self.model}, falling back to structured output")
+                    return self._chat_with_structured_output(messages, functions, function_call, **kwargs)
+
+                return result
             else:
+                logger.info(f"Model {self.model} doesn't support native tools, using structured output")
                 return self._chat_with_structured_output(messages, functions, function_call, **kwargs)
 
         except Exception as e:
@@ -380,7 +389,15 @@ class OllamaProvider(BaseProvider):
                 api_params["think"] = True
                 logger.debug(f"Reasoning enabled for function calling (model: {self.model})")
 
+            # Log the request for debugging
+            logger.debug(f"Sending tool call request to {self.model}")
+            logger.debug(f"Tools: {json.dumps(tools, indent=2)}")
+            logger.debug(f"Temperature: {temperature}")
+
             response = self.client.chat(**api_params)
+
+            # Log the response for debugging
+            logger.debug(f"Raw response from {self.model}: {json.dumps(response, indent=2, default=str)}")
 
             message = response["message"]
 
@@ -400,6 +417,9 @@ class OllamaProvider(BaseProvider):
                     "name": tool_call["function"]["name"],
                     "arguments": json.dumps(tool_call["function"]["arguments"]),
                 }
+                logger.debug(f"Tool call found: {tool_call['function']['name']}")
+            else:
+                logger.warning(f"No tool calls in response from {self.model}. Response content: {processed_content[:200]}")
 
             return result
 

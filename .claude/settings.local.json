@@ -15,7 +15,8 @@
       "Bash(python -m pytest --no-cov -q)",
       "Bash(git reset:*)",
       "Bash(python -m pytest:*)",
-      "Bash(python test_temperature_config.py:*)"
+      "Bash(python test_temperature_config.py:*)",
+      "Bash(python main.py:*)"
     ],
     "deny": [],
     "ask": []
