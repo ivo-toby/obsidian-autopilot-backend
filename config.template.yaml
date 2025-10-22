@@ -17,6 +17,7 @@ inference:
     api_key: ""  # Set via environment variable or directly
     base_url: "https://api.openai.com/v1"  # Optional, for OpenAI-compatible APIs
     model: "gpt-4o"  # Model to use with OpenAI
+    temperature: 0.7  # Temperature for text generation (0.0-2.0, lower = more deterministic)
 
   # Ollama-specific settings (used when provider=ollama)
   # NOTE: Tool calling and reasoning support are automatically detected

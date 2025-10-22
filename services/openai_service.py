@@ -20,7 +20,7 @@ class OpenAIService:
     various text generation and processing tasks.
     """
 
-    def __init__(self, api_key: str, model: str = "gpt-4o-mini", base_url: Optional[str] = None):
+    def __init__(self, api_key: str, model: str = "gpt-4o-mini", base_url: Optional[str] = None, temperature: float = 0.7):
         """
         Initialize the OpenAI service.
 
@@ -28,8 +28,10 @@ class OpenAIService:
             api_key (str): OpenAI API key
             model (str, optional): Model to use for completions. Defaults to "gpt-4o-mini"
             base_url (str, optional): Base URL for the API. Defaults to None (uses OpenAI default)
+            temperature (float, optional): Temperature for text generation. Defaults to 0.7
         """
         self.model = model
+        self.temperature = temperature
         self.client = OpenAI(api_key=api_key, base_url=base_url)
 
     def generate_learning_title(self, learning: str) -> str:
@@ -112,7 +114,7 @@ class OpenAIService:
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
-                temperature=0.6,
+                temperature=self.temperature,
                 messages=messages,
                 functions=functions,
                 function_call=function_call,

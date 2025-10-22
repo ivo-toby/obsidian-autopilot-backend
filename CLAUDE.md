@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-Obsidian Autopilot Backend is a Python tool for processing and enriching Obsidian notes. It provides automatic summarization, task extraction, semantic knowledge base features, and meeting transcript processing.
+Obsidian Autopilot Backend is a Python tool for processing and enriching Obsidian notes. It provides automatic summarization, task extraction, semantic knowledge base features, meeting transcript processing, and audio recording/transcription capabilities (macOS only).
 
 ## Development Commands
 
@@ -14,6 +14,14 @@ python -m venv .venv
 source .venv/bin/activate  # Unix/macOS
 pip install -r requirements.txt
 cp config.template.yaml config.yaml  # Edit with your settings
+
+# Optional: Build Swift audio capture helper (macOS only)
+cd swift && xcrun swiftc -parse-as-library -O -o sckit-capture sckit-capture.swift
+
+# Optional: Install transcription dependencies
+pip install faster-whisper  # Default local ASR (recommended for macOS)
+# For Parakeet (heavy dependencies):
+# pip install soundfile librosa resampy torch torchvision torchaudio 'nemo_toolkit[asr]'
 ```
 
 ### Testing
@@ -56,6 +64,7 @@ isort .                  # Import sorting
 - `LLMService`: Unified LLM interface supporting multiple providers (OpenAI, Ollama)
   - `services/providers/OpenAIProvider`: OpenAI API integration
   - `services/providers/OllamaProvider`: Native Ollama SDK integration with tool support
+- `AudioCaptureService`: macOS per-app audio recording via ScreenCaptureKit (Zoom, Teams, Slack, Discord, Rekordbox)
 
 **Knowledge Base Services:**
 - `services/vector_store/`:
@@ -64,6 +73,11 @@ isort .                  # Import sorting
   - `VectorStoreService`: ChromaDB-based vector storage and similarity search
 - `services/knowledge/`:
   - `LinkService`: Analyzes note relationships and manages Obsidian wiki-links and backlinks
+
+**Transcription Services:**
+- `services/transcribers/`:
+  - `faster_whisper.py`: Default local ASR using CTranslate2 (lightweight, CPU-friendly)
+  - `parakeet.py`: Optional NVIDIA NeMo Parakeet TDT 0.6B v2 (requires heavy dependencies)
 
 ### Key Workflows
 
@@ -90,15 +104,31 @@ isort .                  # Import sorting
 Uses `config.yaml` for all settings:
 - File paths for notes directories (daily, weekly, meetings, learnings)
 - **Inference provider selection** (`inference.provider`: "openai" or "ollama")
-  - OpenAI: `inference.openai.api_key`, `inference.openai.model`, `inference.openai.base_url`
+  - OpenAI: `inference.openai.api_key`, `inference.openai.model`, `inference.openai.base_url`, `inference.openai.temperature`
   - Ollama: `inference.ollama.model`, `inference.ollama.base_url`, temperature, num_ctx, num_thread, timeout
-  - Each provider has its own model setting in its own section
+  - Each provider has its own model setting and temperature in its own section
 - Embedding configuration (model_type: "openai" or "ollama") - separate from inference
 - Vector store settings (path, similarity thresholds, HNSW index parameters)
 - Search thresholds for different query types
 - **Legacy config keys** (api_key, model, base_url) maintained for backward compatibility
 
 ## Common Tasks
+
+### Recording and transcribing meetings
+```bash
+# Build macOS audio capture helper (one-time setup)
+cd swift && xcrun swiftc -parse-as-library -O -o sckit-capture sckit-capture.swift
+
+# Record application audio (macOS only, requires Screen Recording permission)
+python main.py notes --record-audio --app zoom
+# Press 'q' then Enter to stop recording
+
+# Transcribe existing audio file (default: faster-whisper)
+python main.py notes --audio-file ./recordings/meeting_audio.wav
+
+# Record with custom settings
+python main.py notes --record-audio --app teams --stop-key s --audio-out ~/custom/path.wav
+```
 
 ### Processing clipboard meeting transcripts
 ```bash
@@ -139,6 +169,9 @@ pytest tests/services/test_embedding_service.py -v
 
 # Test link service
 pytest tests/services/test_link_service.py -v
+
+# Note: Audio capture and transcription services currently lack automated tests
+# (require macOS runtime, ScreenCaptureKit permissions, and running applications)
 ```
 
 ## Important Implementation Details
@@ -156,6 +189,7 @@ The codebase uses a provider abstraction pattern for LLM operations:
 - Uses OpenAI Python SDK
 - Supports official OpenAI API and OpenAI-compatible APIs (via base_url)
 - Native function calling support
+- Configurable temperature (default: 0.7) via `inference.openai.temperature`
 
 ### Ollama Provider
 - Uses **native Ollama Python SDK** (not OpenAI SDK with base_url hack)
@@ -217,3 +251,74 @@ Embeddings use `EmbeddingService` with separate configuration:
 - **Backlinks**: References from other notes pointing to current note
 - **Semantic links**: Similar notes found via vector search
 - **Suggested links**: Filtered semantic links not already directly linked
+
+### Audio Capture and Transcription (macOS only)
+
+**Architecture:**
+- Uses ScreenCaptureKit (macOS 13+) for per-application audio capture
+- Swift helper binary (`swift/sckit-capture`) preferred for robustness
+- PyObjC fallback available (requires additional dependencies)
+- Records to WAV with optional segmentation (default: 1-hour segments)
+
+**Supported Applications:**
+Bundle IDs mapped in `AudioCaptureService.BUNDLE_IDS`:
+- `zoom`: us.zoom.xos
+- `teams`: com.microsoft.teams2
+- `slack`: com.tinyspeck.slackmacgap
+- `discord`: com.hnc.Discord
+- `rekordbox`: com.pioneerdj.rekordbox
+
+**Recording Configuration** (`config.yaml`):
+```yaml
+recording:
+  output_dir: "./recordings"  # WAV output directory
+  segment_seconds: 3600       # Rotate files every N seconds
+  sample_rate: 16000         # Target sample rate (capture is 48kHz, resampled)
+  channels: 1                # 1=mono, 2=stereo
+```
+
+**Transcription Backends:**
+
+1. **faster-whisper** (default):
+   - CTranslate2-based implementation
+   - Lightweight, CPU-friendly (works well on Apple Silicon)
+   - Supports: wav, m4a, mp3 (via ffmpeg)
+   - Models: small, medium, large-v3
+   - Configuration: model_size, device (auto/cpu), compute_type (int8/float16)
+
+2. **Parakeet** (optional):
+   - NVIDIA NeMo Parakeet TDT 0.6B v2
+   - Requires: torch, nemo_toolkit[asr], soundfile, librosa
+   - Auto-converts to 16kHz mono
+   - Better accuracy but heavier dependencies
+
+**Swift Helper Details:**
+- Location: `swift/sckit-capture.swift`
+- Build: `xcrun swiftc -parse-as-library -O -o sckit-capture sckit-capture.swift`
+- Features:
+  - Per-app audio capture via ScreenCaptureKit
+  - WAV segmentation support
+  - Microphone ringbuffer (captures both app audio and user's microphone)
+  - Handles both system audio and input devices
+- Output: Timestamped WAV files in format `meeting_audio_YYYY-MM-DDTHH-MM-SSZ_NNN.wav`
+
+**Permissions:**
+- First run prompts for Screen Recording permission
+- Location: System Settings → Privacy & Security → Screen Recording
+- Grant permission to Terminal or your IDE
+
+**Implementation Flow** (`main.py:notes --record-audio`):
+1. Check if Swift helper exists (`swift/sckit-capture`)
+2. If found, use Swift helper for recording
+3. Fallback to PyObjC-based `_record_using_screencapturekit()` if helper not found
+4. Save WAV to configured output directory
+5. For transcription: Pass WAV to faster-whisper by default
+6. Save transcript via `MeetingService._save_raw_summary()`
+
+**Phase Status:**
+- ✅ Phase 1: Audio capture to WAV (completed)
+- ✅ Phase 2: Local transcription with faster-whisper (completed)
+- ⏳ Phase 3: Transcriber abstraction layer (in progress)
+- ⏳ Phase 4: End-to-end orchestration with secure deletion (planned)
+
+See `PLAN-TRANSCRIBE.md` for detailed implementation roadmap.
