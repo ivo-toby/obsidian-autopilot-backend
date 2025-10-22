@@ -8,15 +8,15 @@ generate summaries, extract tasks, and manage reminders.
 
 import logging
 import os
+import sys
 import time
 from datetime import datetime
 from typing import Any, Dict
-import sys
 
 from services.knowledge.link_service import LinkService
 from services.learning_service import LearningService
-from services.meeting_service import MeetingService
 from services.llm_service import LLMService
+from services.meeting_service import MeetingService
 from services.summary_service import SummaryService
 from services.vector_store import ChunkingService, EmbeddingService, VectorStoreService
 from utils.cli import setup_argparser
@@ -54,9 +54,7 @@ def process_meeting_notes(cfg, cli_args):
         # Check if custom prompt file was specified
         prompt_file = getattr(cli_args, "prompt_file", None)
         meeting_service.process_meeting_transcript(
-            date_str=cli_args.date,
-            dry_run=cli_args.dry_run,
-            prompt_file=prompt_file
+            date_str=cli_args.date, dry_run=cli_args.dry_run, prompt_file=prompt_file
         )
     else:
         meeting_service.process_meeting_notes(
@@ -107,7 +105,9 @@ def process_knowledge_base(cfg, cli_args):
                 try:
                     logger.info(f"Analyzing links for: {note['path']}")
                     # Enable auto_index=True to ensure notes are indexed if not found
-                    analysis = link_service.analyze_relationships(note["path"], auto_index=True)
+                    analysis = link_service.analyze_relationships(
+                        note["path"], auto_index=True
+                    )
                     _display_link_analysis(note["path"], analysis, cfg)
 
                     # Update links based on suggestions
@@ -121,7 +121,12 @@ def process_knowledge_base(cfg, cli_args):
                             for suggestion in analysis["suggested_links"]
                         ]
                         # Add links without updating vector store since we're only adding references
-                        link_service.update_obsidian_links(note["path"], links_to_add, update_backlinks=True, skip_vector_update=True)
+                        link_service.update_obsidian_links(
+                            note["path"],
+                            links_to_add,
+                            update_backlinks=True,
+                            skip_vector_update=True,
+                        )
                         logger.info(f"Links updated successfully for: {note['path']}")
                 except Exception as e:
                     logger.error(f"Error analyzing note {note['path']}: {str(e)}")
@@ -131,7 +136,9 @@ def process_knowledge_base(cfg, cli_args):
             if not cli_args.dry_run:
                 current_time = time.time()
                 vector_store.set_last_update_time(current_time)
-                logger.info(f"Updated last_update timestamp to {datetime.fromtimestamp(current_time)}")
+                logger.info(
+                    f"Updated last_update timestamp to {datetime.fromtimestamp(current_time)}"
+                )
 
         elif cli_args.reindex or cli_args.update:
             if cli_args.reindex:
@@ -164,7 +171,9 @@ def process_knowledge_base(cfg, cli_args):
                             note["content"], doc_type=note.get("type", "note")
                         )
                         if not chunks:
-                            logger.warning(f"No chunks generated for note: {note['id']}")
+                            logger.warning(
+                                f"No chunks generated for note: {note['id']}"
+                            )
                             continue
 
                         chunk_texts = [chunk["content"] for chunk in chunks]
@@ -199,7 +208,7 @@ def process_knowledge_base(cfg, cli_args):
                 query_embedding=query_embedding,
                 limit=cli_args.limit or cfg["search"]["default_limit"],
                 doc_type=cli_args.note_type,
-                threshold=cfg["search"]["thresholds"]["default"]
+                threshold=cfg["search"]["thresholds"]["default"],
             )
             if not results:
                 logger.info("No matching results found")
@@ -221,23 +230,27 @@ def process_knowledge_base(cfg, cli_args):
             results = vector_store.find_similar(
                 query_embedding=query_embedding,
                 limit=cli_args.limit or cfg["search"]["default_limit"],
-                threshold=cfg["search"]["thresholds"]["tag_search"]
+                threshold=cfg["search"]["thresholds"]["tag_search"],
             )
             _display_search_results(results, cfg, focus="tags")
 
         elif cli_args.find_by_date:
             try:
-                date = datetime.strptime(cli_args.find_by_date, cfg["display"]["date_format"])
+                date = datetime.strptime(
+                    cli_args.find_by_date, cfg["display"]["date_format"]
+                )
                 query = f"date:{date.strftime(cfg['display']['date_format'])}"
                 query_embedding = embedding_service.embed_text(query)
                 results = vector_store.find_similar(
                     query_embedding=query_embedding,
                     limit=cli_args.limit or cfg["search"]["default_limit"],
-                    threshold=cfg["search"]["thresholds"]["date_search"]
+                    threshold=cfg["search"]["thresholds"]["date_search"],
                 )
                 _display_search_results(results, cfg, focus="dates")
             except ValueError:
-                logger.error(f"Invalid date format. Please use {cfg['display']['date_format']}")
+                logger.error(
+                    f"Invalid date format. Please use {cfg['display']['date_format']}"
+                )
 
         elif cli_args.analyze_links:
             note_path = os.path.expanduser(cli_args.analyze_links)
@@ -339,7 +352,9 @@ def _display_connections_graph(note_path, connections, cfg):
         print("```")
 
 
-def _display_link_analysis(note_path: str, analysis: Dict[str, Any], cfg: Dict[str, Any]) -> None:
+def _display_link_analysis(
+    note_path: str, analysis: Dict[str, Any], cfg: Dict[str, Any]
+) -> None:
     """Display link analysis results."""
     print(f"\nLink Analysis for {note_path}:")
 
@@ -370,7 +385,9 @@ def _display_link_analysis(note_path: str, analysis: Dict[str, Any], cfg: Dict[s
             f"(similarity: {suggestion['similarity']:.2f})"
         )
         print(f"  Reason: {suggestion['reason']}")
-        print(f"  Preview: {suggestion['preview'][:cfg['display']['preview_length']]}...")
+        print(
+            f"  Preview: {suggestion['preview'][:cfg['display']['preview_length']]}..."
+        )
 
 
 def _display_note_structure(chunks, cfg):
@@ -396,8 +413,10 @@ if __name__ == "__main__":
     # Configure logging based on config
     logging.basicConfig(
         level=getattr(logging, cfg.get("logging", {}).get("level", "INFO").upper()),
-        format=cfg.get("logging", {}).get("format", "%(levelname)s:%(name)s:%(message)s"),
-        force=True  # Override any existing configuration
+        format=cfg.get("logging", {}).get(
+            "format", "%(levelname)s:%(name)s:%(message)s"
+        ),
+        force=True,  # Override any existing configuration
     )
 
     # Set logging level for specific modules
@@ -416,7 +435,6 @@ if __name__ == "__main__":
             process_weekly_notes(cfg, args)
         else:
             process_daily_notes(cfg, args)
-            process_meeting_notes(cfg, args)
             process_new_learnings(cfg, args)
     elif args.command == "kb":
         process_knowledge_base(cfg, args)
