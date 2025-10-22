@@ -37,11 +37,13 @@ class OpenAIProvider(BaseProvider):
                 inference_config.get("model") or
                 "gpt-4o"
             )
+            self.temperature = openai_config.get("temperature", 0.7)
         else:
             # Legacy config format
             self.api_key = config.get("api_key", "")
             self.base_url = config.get("base_url")
             self.model = config.get("model", "gpt-4o")
+            self.temperature = config.get("temperature", 0.7)
 
         self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
         logger.info(f"Initialized OpenAI provider with model: {self.model}")
@@ -59,7 +61,7 @@ class OpenAIProvider(BaseProvider):
         """
         try:
             max_tokens = kwargs.get("max_tokens", 1500)
-            temperature = kwargs.get("temperature", 0.7)
+            temperature = kwargs.get("temperature", self.temperature)
 
             response = self.client.chat.completions.create(
                 model=self.model,
@@ -87,7 +89,7 @@ class OpenAIProvider(BaseProvider):
         """
         try:
             max_tokens = kwargs.get("max_tokens", 1500)
-            temperature = kwargs.get("temperature", 0.7)
+            temperature = kwargs.get("temperature", self.temperature)
 
             response = self.client.chat.completions.create(
                 model=self.model,
@@ -125,7 +127,7 @@ class OpenAIProvider(BaseProvider):
             Optional[Dict[str, Any]]: Response message with function call or None
         """
         try:
-            temperature = kwargs.get("temperature", 0.6)
+            temperature = kwargs.get("temperature", self.temperature)
 
             response = self.client.chat.completions.create(
                 model=self.model,

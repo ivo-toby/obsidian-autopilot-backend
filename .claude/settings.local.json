@@ -13,9 +13,15 @@
       "Bash(python -m pytest --no-cov -v)",
       "Bash(python -m pytest tests/services/test_link_service.py::test_analysis_state_persistence -v --no-cov)",
       "Bash(python -m pytest --no-cov -q)",
-      "Bash(git reset:*)"
+      "Bash(git reset:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(python test_temperature_config.py:*)"
     ],
     "deny": [],
     "ask": []
-  }
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "contentful"
+  ]
 }
