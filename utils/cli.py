@@ -81,6 +81,11 @@ def setup_argparser() -> argparse.ArgumentParser:
         help="Update only modified notes in the vector store (faster than full reindex)",
     )
     kb_parser.add_argument(
+        "--force-hash-check",
+        action="store_true",
+        help="Check content hash for all notes, ignoring mtime (useful after migration or cloud sync)",
+    )
+    kb_parser.add_argument(
         "--query", type=str, help="Search for similar content in the vector store"
     )
     kb_parser.add_argument(

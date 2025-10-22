@@ -149,23 +149,32 @@ def process_knowledge_base(cfg, cli_args):
                 notes = summary_service.get_all_notes()
             else:
                 last_update = vector_store.get_last_update_time()
-                logger.info(
-                    f"Checking for notes modified since {datetime.fromtimestamp(last_update)}"
-                )
 
-                # Get all notes and filter by mtime first, then check content hash
+                # Get all notes
                 all_notes = summary_service.get_all_notes()
-                touched_notes = [
-                    note
-                    for note in all_notes
-                    if note.get("modified_time", 0) > last_update
-                ]
+
+                # Determine which notes to check based on flags
+                if cli_args.force_hash_check:
+                    logger.info("Checking content hash for all notes (--force-hash-check)")
+                    touched_notes = all_notes
+                else:
+                    logger.info(
+                        f"Checking for notes modified since {datetime.fromtimestamp(last_update)}"
+                    )
+                    touched_notes = [
+                        note
+                        for note in all_notes
+                        if note.get("modified_time", 0) > last_update
+                    ]
 
                 if not touched_notes:
                     logger.info("No notes have been modified since last update")
                     return
 
-                logger.info(f"Found {len(touched_notes)} notes with updated timestamps")
+                if cli_args.force_hash_check:
+                    logger.info(f"Checking content hash for {len(touched_notes)} notes")
+                else:
+                    logger.info(f"Found {len(touched_notes)} notes with updated timestamps")
 
                 # Filter by content hash to find actual changes
                 notes = []
@@ -176,20 +185,26 @@ def process_knowledge_base(cfg, cli_args):
                     else:
                         skipped_count += 1
                         logger.debug(
-                            f"Skipping {note['id']} - mtime updated but content unchanged "
+                            f"Skipping {note['id']} - content unchanged "
                             f"(mtime: {datetime.fromtimestamp(note.get('modified_time', 0))})"
                         )
 
                 if not notes:
-                    logger.info(
-                        f"No notes with actual content changes need updating "
-                        f"({skipped_count} files had timestamp-only changes)"
-                    )
+                    if cli_args.force_hash_check:
+                        logger.info(
+                            f"No notes with content changes need updating "
+                            f"(checked {len(touched_notes)} notes)"
+                        )
+                    else:
+                        logger.info(
+                            f"No notes with actual content changes need updating "
+                            f"({skipped_count} files had timestamp-only changes)"
+                        )
                     return
 
                 logger.info(
                     f"Found {len(notes)} notes with actual content changes "
-                    f"(skipped {skipped_count} files with timestamp-only changes)"
+                    f"(skipped {skipped_count} files with unchanged content)"
                 )
 
             if not cli_args.dry_run:
