@@ -7,6 +7,7 @@ chromadb==0.4.24
 tqdm==4.66.2
 numpy<2.0.0  # Pin numpy to version before 2.0
 pyperclip==1.8.2
+langchain-text-splitters>=1.0.0
 
 # Testing
 pytest>=7.0.0
