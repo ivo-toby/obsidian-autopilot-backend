@@ -20,7 +20,13 @@ class OpenAIService:
     various text generation and processing tasks.
     """
 
-    def __init__(self, api_key: str, model: str = "gpt-4o-mini", base_url: Optional[str] = None, temperature: float = 0.7):
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "gpt-4o-mini",
+        base_url: Optional[str] = None,
+        temperature: float = 0.7,
+    ):
         """
         Initialize the OpenAI service.
 
@@ -51,7 +57,6 @@ class OpenAIService:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=50,
             )
             if response.choices[0].message.content:
                 return response.choices[0].message.content.strip()
@@ -79,7 +84,6 @@ class OpenAIService:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=50,
             )
             if response.choices[0].message.content:
                 return [
@@ -241,7 +245,8 @@ class OpenAIService:
 
         try:
             response = self.client.chat.completions.create(
-                model=self.model, messages=messages, max_tokens=1500
+                model=self.model,
+                messages=messages,
             )
             print(response)
             return response.choices[0].message.content
@@ -371,6 +376,7 @@ Journal entries:\n{notes}"""
         if response and response.function_call and response.function_call.arguments:
             try:
                 import json
+
                 return json.loads(response.function_call.arguments)
             except Exception as e:
                 print(f"Error parsing meeting notes: {e}")

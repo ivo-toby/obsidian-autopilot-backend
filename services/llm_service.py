@@ -37,7 +37,9 @@ class LLMService:
         """
         self.config = config
         self.provider = self._initialize_provider(config)
-        logger.info(f"Initialized LLM service with provider: {self.provider.get_provider_name()}")
+        logger.info(
+            f"Initialized LLM service with provider: {self.provider.get_provider_name()}"
+        )
 
     def _initialize_provider(self, config: Dict[str, Any]) -> BaseProvider:
         """
@@ -105,7 +107,7 @@ class LLMService:
             f"Generate a concise short title for the following learning:\n\n{learning}"
         )
         try:
-            response = self.provider.generate_text(prompt, max_tokens=50)
+            response = self.provider.generate_text(prompt)
             return response.strip() if response else "Untitled Learning"
         except Exception as e:
             logger.error(f"Error generating title: {e}")
@@ -127,7 +129,7 @@ class LLMService:
             f"{learning}"
         )
         try:
-            response = self.provider.generate_text(prompt, max_tokens=50)
+            response = self.provider.generate_text(prompt)
             if response:
                 return [tag.strip() for tag in response.split(",")]
             return []
@@ -140,7 +142,7 @@ class LLMService:
         messages: List[Dict[str, str]],
         functions: List[Dict[str, Any]],
         function_call: Dict[str, str],
-        **kwargs
+        **kwargs,
     ) -> Optional[Dict[str, Any]]:
         """
         Make a chat completion request with function calling.
@@ -175,8 +177,7 @@ class LLMService:
                     self.content = content
                     if function_call_dict:
                         self.function_call = FunctionCall(
-                            function_call_dict["name"],
-                            function_call_dict["arguments"]
+                            function_call_dict["name"], function_call_dict["arguments"]
                         )
                     else:
                         self.function_call = None
@@ -289,7 +290,7 @@ Use the function to extract:
         ]
 
         try:
-            result = self.provider.chat_completion(messages, max_tokens=1500)
+            result = self.provider.chat_completion(messages)
             return result.get("content")
         except Exception as e:
             logger.error(f"An error occurred: {e}")

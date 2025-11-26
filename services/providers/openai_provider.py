@@ -5,6 +5,7 @@ This module provides the OpenAI implementation of the LLM provider interface.
 """
 
 import logging
+import os
 from typing import Any, Dict, List, Optional
 
 from openai import OpenAI
@@ -29,18 +30,20 @@ class OpenAIProvider(BaseProvider):
 
         # Support both new and legacy config formats
         if "openai" in inference_config:
-            # New config format - read from openai section first, then inference root, then legacy
-            self.api_key = openai_config.get("api_key") or config.get("api_key", "")
+            # New config format - read from openai section first, then inference root, then legacy, then env
+            self.api_key = (
+                openai_config.get("api_key")
+                or config.get("api_key")
+                or os.environ.get("OPENAI_API_KEY", "")
+            )
             self.base_url = openai_config.get("base_url")
             self.model = (
-                openai_config.get("model") or
-                inference_config.get("model") or
-                "gpt-4o"
+                openai_config.get("model") or inference_config.get("model") or "gpt-4o"
             )
             self.temperature = openai_config.get("temperature", 0.7)
         else:
-            # Legacy config format
-            self.api_key = config.get("api_key", "")
+            # Legacy config format - fall back to env if not in config
+            self.api_key = config.get("api_key") or os.environ.get("OPENAI_API_KEY", "")
             self.base_url = config.get("base_url")
             self.model = config.get("model", "gpt-4o")
             self.temperature = config.get("temperature", 0.7)
@@ -54,19 +57,17 @@ class OpenAIProvider(BaseProvider):
 
         Args:
             prompt (str): The input prompt
-            **kwargs: Additional parameters (max_tokens, temperature, etc.)
+            **kwargs: Additional parameters (temperature, etc.)
 
         Returns:
             str: Generated text response
         """
         try:
-            max_tokens = kwargs.get("max_tokens", 1500)
             temperature = kwargs.get("temperature", self.temperature)
 
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=max_tokens,
                 temperature=temperature,
             )
             return response.choices[0].message.content or ""
@@ -82,19 +83,17 @@ class OpenAIProvider(BaseProvider):
 
         Args:
             messages (List[Dict[str, str]]): List of message dictionaries
-            **kwargs: Additional parameters (max_tokens, temperature, etc.)
+            **kwargs: Additional parameters (temperature, etc.)
 
         Returns:
             Dict[str, Any]: Response dictionary
         """
         try:
-            max_tokens = kwargs.get("max_tokens", 1500)
             temperature = kwargs.get("temperature", self.temperature)
 
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                max_tokens=max_tokens,
                 temperature=temperature,
             )
 
@@ -112,7 +111,7 @@ class OpenAIProvider(BaseProvider):
         messages: List[Dict[str, str]],
         functions: List[Dict[str, Any]],
         function_call: Dict[str, str],
-        **kwargs
+        **kwargs,
     ) -> Optional[Dict[str, Any]]:
         """
         Generate a chat completion with function calling using OpenAI.
