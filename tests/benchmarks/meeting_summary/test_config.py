@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Optional
 
 import pytest
 
@@ -14,8 +15,8 @@ def _write_config(
     model: titan/ollama/gemma4:12b
     kind: candidate
 """,
-    prompts: str | None = None,
-    cases: str | None = None,
+    prompts: Optional[str] = None,
+    cases: Optional[str] = None,
     generation: str = """\
   repetitions: 3
   thinking: off
@@ -111,6 +112,60 @@ judge:
     assert isinstance(config.prompts, tuple)
     assert isinstance(config.cases, tuple)
     assert isinstance(config.models, tuple)
+
+
+def test_load_config_resolves_relative_paths_and_expands_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    config_dir = tmp_path / "configs"
+    relative_dir = config_dir / "fixtures"
+    home_dir = tmp_path / "home"
+    config_dir.mkdir()
+    relative_dir.mkdir()
+    home_dir.mkdir()
+    (relative_dir / "prompt.md").write_text("prompt", encoding="utf-8")
+    (relative_dir / "transcript.md").write_text("transcript", encoding="utf-8")
+    (home_dir / "golden.md").write_text("golden", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home_dir))
+
+    config_path = config_dir / "benchmark.yaml"
+    config_path.write_text(
+        """\
+version: 1
+output_dir: ~/results
+generation:
+  repetitions: 1
+  thinking: off
+  timeout_seconds: 10
+prompts:
+  - id: current
+    path: fixtures/prompt.md
+cases:
+  - id: sync
+    transcript: fixtures/transcript.md
+    golden: ~/golden.md
+    split: development
+models:
+  - id: gemma12
+    provider: homelab
+    model: titan/ollama/gemma4:12b
+    kind: candidate
+judge:
+  provider: openai-codex
+  model: gpt-5.6-sol
+  thinking: high
+  timeout_seconds: 10
+  pairwise_top_k: 2
+""",
+        encoding="utf-8",
+    )
+
+    config = load_benchmark_config(config_path)
+
+    assert config.output_dir == home_dir / "results"
+    assert config.prompts[0].path == relative_dir / "prompt.md"
+    assert config.cases[0].transcript == relative_dir / "transcript.md"
+    assert config.cases[0].golden == home_dir / "golden.md"
 
 
 def test_duplicate_model_ids_are_rejected(tmp_path: Path):
