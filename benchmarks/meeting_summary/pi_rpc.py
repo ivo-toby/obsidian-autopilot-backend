@@ -1,5 +1,7 @@
 """One-shot JSONL RPC client for isolated Pi benchmark generations."""
 
+from __future__ import annotations
+
 import json
 import os
 import queue
@@ -259,6 +261,11 @@ class PiRpcClient:
         except queue.Empty:
             raise _ExecutionFailure("timed out waiting for RPC response")
         if line is None:
+            if process.poll() is None:
+                try:
+                    process.wait(timeout=0.1)
+                except subprocess.TimeoutExpired:
+                    pass
             if process.poll() is not None:
                 raise _ExecutionFailure("process exited before RPC completed")
             raise _ExecutionFailure("stdout reader stopped unexpectedly")

@@ -67,6 +67,8 @@ def main() -> None:
         text = ""
     elif MODE == "length_stop":
         stop_reason = "length"
+    elif MODE == "aborted_stop":
+        stop_reason = "aborted"
 
     emit(
         {

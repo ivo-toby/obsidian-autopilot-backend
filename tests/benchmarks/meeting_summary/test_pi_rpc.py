@@ -1,7 +1,10 @@
+import ast
 import json
 import stat
 import time
 from pathlib import Path
+
+import benchmarks.meeting_summary.pi_rpc as pi_rpc_module
 
 import pytest
 
@@ -103,6 +106,24 @@ def test_rpc_client_raises_on_error_stop_reason(
         run(fake_pi_path, monkeypatch, "error_stop")
 
 
+def test_rpc_client_raises_on_length_stop_reason(
+    fake_pi_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    with pytest.raises(
+        PiRpcError, match="homelab.*titan/ollama/gemma4:12b.*length"
+    ):
+        run(fake_pi_path, monkeypatch, "length_stop")
+
+
+def test_rpc_client_raises_on_aborted_stop_reason(
+    fake_pi_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    with pytest.raises(
+        PiRpcError, match="homelab.*titan/ollama/gemma4:12b.*aborted"
+    ):
+        run(fake_pi_path, monkeypatch, "aborted_stop")
+
+
 def test_rpc_client_raises_on_empty_assistant_text(
     fake_pi_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -140,6 +161,17 @@ def test_rpc_client_surfaces_early_process_exit(
         PiRpcError, match="homelab.*titan/ollama/gemma4:12b.*exited"
     ):
         run(fake_pi_path, monkeypatch, "exit_early")
+
+
+def test_rpc_client_annotations_are_python_38_safe():
+    source = Path(pi_rpc_module.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    assert any(
+        isinstance(node, ast.ImportFrom)
+        and node.module == "__future__"
+        and any(alias.name == "annotations" for alias in node.names)
+        for node in tree.body
+    )
 
 
 def test_rpc_client_captures_stderr_without_deadlock(
