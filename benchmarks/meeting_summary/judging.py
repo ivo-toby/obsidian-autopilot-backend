@@ -262,10 +262,17 @@ def judge_generations(
     results: List[JudgeResult] = []
     for artifact in artifacts:
         case = _case(config, artifact.case_id)
-        transcript = case.transcript.read_text(encoding="utf-8")
-        golden = case.golden.read_text(encoding="utf-8")
-        summary_path = store.run_dir / artifact.summary_path
-        candidate = summary_path.read_text(encoding="utf-8")
+        try:
+            transcript, golden = _load_judge_inputs(store, artifact, case)
+            candidate = _read_verified_summary(store, artifact)
+        except (OSError, UnicodeError, ValueError) as error:
+            store.write_json(
+                _judgment_path(artifact),
+                _judgment_failure_payload(artifact, str(error)),
+            )
+            if fail_fast:
+                raise
+            continue
         prompt = render_judge_prompt(template, transcript, golden, candidate)
         cache_key = canonical_json_hash(
             {
@@ -275,6 +282,7 @@ def judge_generations(
                 "generation_cache_key": artifact.cache_key,
                 "transcript_sha256": sha256_text(transcript),
                 "golden_sha256": sha256_text(golden),
+                "golden_snapshot_sha256": sha256_text(golden),
                 "candidate_sha256": sha256_text(candidate),
                 "judge_provider": config.judge.provider,
                 "judge_model": config.judge.model,
@@ -289,7 +297,14 @@ def judge_generations(
             results.append(_result_from_payload(payload))
             continue
         payload = _run_absolute_judge(
-            config, store, client, artifact, case.id, prompt, cache_key
+            config,
+            store,
+            client,
+            artifact,
+            case.id,
+            prompt,
+            cache_key,
+            sha256_text(golden),
         )
         path = store.write_json(_judgment_path(artifact), payload)
         if payload["status"] == "complete":
@@ -299,7 +314,9 @@ def judge_generations(
     return tuple(results)
 
 
-def _run_absolute_judge(config, store, client, artifact, case_id, prompt, cache_key):
+def _run_absolute_judge(
+    config, store, client, artifact, case_id, prompt, cache_key, golden_sha256
+):
     attempts: List[str] = []
     started = time.monotonic()
     request = PiRequest(
@@ -337,6 +354,7 @@ def _run_absolute_judge(config, store, client, artifact, case_id, prompt, cache_
                 usage,
                 time.monotonic() - started,
                 "",
+                golden_sha256,
             )
         except JudgmentParseError as parse_error:
             if attempt == 1:
@@ -354,6 +372,7 @@ def _run_absolute_judge(config, store, client, artifact, case_id, prompt, cache_
         usage,
         time.monotonic() - started,
         error,
+        golden_sha256,
     )
 
 
@@ -433,10 +452,18 @@ def judge_pairwise_top_models(
             if item_b is None:
                 continue
             case = _case(config, item_a.case_id)
-            transcript = case.transcript.read_text(encoding="utf-8")
-            golden = case.golden.read_text(encoding="utf-8")
-            text_a = (store.run_dir / item_a.summary_path).read_text(encoding="utf-8")
-            text_b = (store.run_dir / item_b.summary_path).read_text(encoding="utf-8")
+            try:
+                transcript, golden = _load_judge_inputs(store, item_a, case)
+                text_a = _read_verified_summary(store, item_a)
+                text_b = _read_verified_summary(store, item_b)
+            except (OSError, UnicodeError, ValueError) as error:
+                store.write_json(
+                    _pairwise_path(item_a, item_b),
+                    _pairwise_failure_payload(item_a, item_b, str(error)),
+                )
+                if fail_fast:
+                    raise
+                continue
             first, second = choose_pairwise_order(
                 model_a, model_b, item_a.case_id, item_a.prompt_id, item_a.repetition
             )
@@ -460,6 +487,7 @@ def judge_pairwise_top_models(
                     "golden_sha256": sha256_text(golden),
                     "summary_a_sha256": sha256_text(text_a),
                     "summary_b_sha256": sha256_text(text_b),
+                    "golden_snapshot_sha256": sha256_text(golden),
                     "judge_provider": config.judge.provider,
                     "judge_model": config.judge.model,
                     "judge_thinking": config.judge.thinking,
@@ -480,6 +508,7 @@ def judge_pairwise_top_models(
                 second,
                 prompt,
                 cache_key,
+                sha256_text(golden),
             )
             path = store.write_json(_pairwise_path(item_a, item_b), payload)
             if result is not None:
@@ -509,7 +538,9 @@ def choose_pairwise_order(
     return (canonical_order[1], canonical_order[0])
 
 
-def _run_pairwise(config, client, item_a, item_b, first, second, prompt, cache_key):
+def _run_pairwise(
+    config, client, item_a, item_b, first, second, prompt, cache_key, golden_sha256
+):
     started = time.monotonic()
     attempts: List[str] = []
     usage: Dict[str, object] = {}
@@ -564,6 +595,8 @@ def _run_pairwise(config, client, item_a, item_b, first, second, prompt, cache_k
                     usage,
                     time.monotonic() - started,
                     "complete",
+                    "",
+                    golden_sha256,
                 ),
                 result,
             )
@@ -584,6 +617,7 @@ def _run_pairwise(config, client, item_a, item_b, first, second, prompt, cache_k
             time.monotonic() - started,
             "failed",
             error,
+            golden_sha256,
         ),
         None,
     )
@@ -653,6 +687,97 @@ def _completed_judgments(
     return values
 
 
+def _load_judge_inputs(store, artifact, case):
+    transcript = _load_input_snapshot(
+        store, "transcripts", case.id, artifact.transcript_sha256
+    )
+    current_transcript = case.transcript.read_text(encoding="utf-8")
+    if sha256_text(current_transcript) != artifact.transcript_sha256:
+        raise ValueError(
+            "transcript changed since generation; require regeneration"
+        )
+    golden_hashes = store.manifest.get("golden_sha256", {})
+    golden_hash = (
+        golden_hashes.get(case.id) if isinstance(golden_hashes, Mapping) else None
+    )
+    if not golden_hash:
+        raise ValueError("golden snapshot is missing; require a new run")
+    golden = _load_input_snapshot(store, "goldens", case.id, str(golden_hash))
+    current_golden = case.golden.read_text(encoding="utf-8")
+    if sha256_text(current_golden) != str(golden_hash):
+        raise ValueError("golden summary changed since run creation")
+    return transcript, golden
+
+
+def _load_input_snapshot(store, category, identifier, digest):
+    prefix = _safe(identifier) + "-" + digest + ".md"
+    path = store.run_dir / "inputs" / category / prefix
+    if not path.is_file():
+        raise ValueError(
+            "%s snapshot is missing; require regeneration" % category
+        )
+    content = path.read_text(encoding="utf-8")
+    if sha256_text(content) != digest:
+        raise ValueError(
+            "%s snapshot hash mismatch; require regeneration" % category
+        )
+    return content
+
+
+def _read_verified_summary(store, artifact):
+    if not artifact.summary_sha256:
+        raise ValueError("generation summary hash is missing; require regeneration")
+    path = store.run_dir / artifact.summary_path
+    content = path.read_text(encoding="utf-8")
+    if sha256_text(content) != artifact.summary_sha256:
+        raise ValueError(
+            "generation summary is missing or corrupt; require regeneration"
+        )
+    return content
+
+
+def _judgment_failure_payload(artifact, error):
+    return {
+        "schema_version": 1,
+        "operation": "judgment",
+        "cache_key": "preflight-%s" % artifact.cache_key,
+        "generation_cache_key": artifact.cache_key,
+        "status": "failed",
+        "case_id": artifact.case_id,
+        "split": artifact.split,
+        "prompt_id": artifact.prompt_id,
+        "model_id": artifact.model_id,
+        "provider": artifact.provider,
+        "model": artifact.model,
+        "kind": artifact.kind,
+        "repetition": artifact.repetition,
+        "raw_attempts": [],
+        "raw_response": "",
+        "usage": {},
+        "elapsed_seconds": 0.0,
+        "error": error,
+    }
+
+
+def _pairwise_failure_payload(item_a, item_b, error):
+    return {
+        "schema_version": 1,
+        "operation": "pairwise",
+        "cache_key": "preflight-%s-%s" % (item_a.cache_key, item_b.cache_key),
+        "status": "failed",
+        "model_a_id": item_a.model_id,
+        "model_b_id": item_b.model_id,
+        "case_id": item_a.case_id,
+        "prompt_id": item_a.prompt_id,
+        "repetition": item_a.repetition,
+        "raw_attempts": [],
+        "raw_response": "",
+        "usage": {},
+        "elapsed_seconds": 0.0,
+        "error": error,
+    }
+
+
 def _case(config: BenchmarkConfig, case_id: str):
     for case in config.cases:
         if case.id == case_id:
@@ -686,7 +811,16 @@ def _safe(value: str) -> str:
 
 
 def _judgment_payload(
-    artifact, case_id, cache_key, status, attempts, result, usage, elapsed, error
+    artifact,
+    case_id,
+    cache_key,
+    status,
+    attempts,
+    result,
+    usage,
+    elapsed,
+    error,
+    golden_sha256="",
 ):
     payload = {
         "schema_version": 1,
@@ -706,6 +840,7 @@ def _judgment_payload(
         "raw_response": attempts[-1] if attempts else "",
         "usage": usage,
         "elapsed_seconds": elapsed,
+        "golden_snapshot_sha256": golden_sha256,
     }
     if result is not None:
         result_payload = _result_payload(result)
@@ -743,7 +878,16 @@ def _result_from_payload(payload):
 
 
 def _pairwise_payload(
-    item_a, item_b, cache_key, attempts, result, usage, elapsed, status, error=""
+    item_a,
+    item_b,
+    cache_key,
+    attempts,
+    result,
+    usage,
+    elapsed,
+    status,
+    error="",
+    golden_sha256="",
 ):
     payload = {
         "schema_version": 1,
@@ -759,6 +903,7 @@ def _pairwise_payload(
         "raw_response": attempts[-1] if attempts else "",
         "usage": usage,
         "elapsed_seconds": elapsed,
+        "golden_snapshot_sha256": golden_sha256,
     }
     if result is not None:
         payload["result"] = {

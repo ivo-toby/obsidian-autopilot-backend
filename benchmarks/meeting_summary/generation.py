@@ -66,6 +66,7 @@ class GenerationArtifact:
     session_tokens: Dict[str, object]
     stop_reason: str
     summary_path: str
+    summary_sha256: str
     stderr: str
     artifact_path: Optional[Path] = None
     error: str = ""
@@ -95,6 +96,7 @@ class GenerationArtifact:
             session_tokens=_as_dict(payload.get("session_tokens", {})),
             stop_reason=str(payload.get("stop_reason", "")),
             summary_path=str(payload.get("summary_path", "")),
+            summary_sha256=str(payload.get("summary_sha256", "")),
             stderr=str(payload.get("stderr", "")),
             artifact_path=path,
             error=str(payload.get("error", "")),
@@ -122,6 +124,7 @@ class GenerationArtifact:
             "session_tokens": self.session_tokens,
             "stop_reason": self.stop_reason,
             "summary_path": self.summary_path,
+            "summary_sha256": self.summary_sha256,
             "stderr": self.stderr,
         }
         if self.error:
@@ -177,7 +180,7 @@ def generate_candidates(
                         cached = GenerationArtifact.from_payload(
                             store.read_json(cached_path), cached_path
                         )
-                        if _artifact_matches_job(cached, job):
+                        if _artifact_matches_job(cached, job, store):
                             artifacts.append(cached)
                             continue
                     try:
@@ -281,7 +284,7 @@ def _validate_response_identity(
 
 
 def _artifact_matches_job(
-    artifact: GenerationArtifact, job: GenerationJob
+    artifact: GenerationArtifact, job: GenerationJob, store: RunStore
 ) -> bool:
     expected = {
         "schema_version": BENCHMARK_SCHEMA_VERSION,
@@ -299,9 +302,19 @@ def _artifact_matches_job(
         "thinking": job.thinking,
         "repetition": job.repetition,
     }
-    return all(
+    if artifact.status != "complete" or not all(
         getattr(artifact, field) == value for field, value in expected.items()
-    )
+    ):
+        return False
+    if not artifact.summary_sha256 or not artifact.summary_path:
+        return False
+    summary_path = store.run_dir / artifact.summary_path
+    try:
+        return summary_path.is_file() and sha256_text(
+            summary_path.read_text(encoding="utf-8")
+        ) == artifact.summary_sha256
+    except (OSError, UnicodeError):
+        return False
 
 
 def _complete_artifact(
@@ -328,6 +341,7 @@ def _complete_artifact(
         session_tokens=dict(response.session_tokens),
         stop_reason=response.stop_reason,
         summary_path=_summary_relative_path(job).as_posix(),
+        summary_sha256=sha256_text(response.text),
         stderr=response.stderr,
     )
 
@@ -354,6 +368,7 @@ def _failed_artifact(job: GenerationJob, error: str) -> GenerationArtifact:
         session_tokens={},
         stop_reason="",
         summary_path=_summary_relative_path(job).as_posix(),
+        summary_sha256="",
         stderr=error,
         error=error,
     )
@@ -373,6 +388,7 @@ def _generation_dir(job: GenerationJob) -> Path:
         / _safe(job.model_id)
         / _safe(job.prompt_id)
         / _safe(job.case_id)
+        / job.cache_key
     )
 
 
@@ -451,6 +467,7 @@ def _as_dict(value: object) -> Dict[str, object]:
 def _record_inputs(store: RunStore, prompts, cases) -> None:
     prompt_hashes = _as_dict(store.manifest.get("prompt_sha256", {}))
     transcript_hashes = _as_dict(store.manifest.get("transcript_sha256", {}))
+    golden_hashes = _as_dict(store.manifest.get("golden_sha256", {}))
     for prompt in prompts:
         text = prompt.path.read_text(encoding="utf-8")
         prompt_hashes[prompt.id] = sha256_text(text)
@@ -459,6 +476,10 @@ def _record_inputs(store: RunStore, prompts, cases) -> None:
         text = case.transcript.read_text(encoding="utf-8")
         transcript_hashes[case.id] = sha256_text(text)
         store.store_input("transcripts", case.id, text)
+        golden = case.golden.read_text(encoding="utf-8")
+        golden_hashes[case.id] = sha256_text(golden)
+        store.store_input("goldens", case.id, golden)
     store.manifest["prompt_sha256"] = prompt_hashes
     store.manifest["transcript_sha256"] = transcript_hashes
+    store.manifest["golden_sha256"] = golden_hashes
     store.write_json(Path("manifest.json"), store.manifest)

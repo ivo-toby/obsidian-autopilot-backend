@@ -54,11 +54,14 @@ extensions, skills, prompt templates, context files, or system/coding prompt. Ov
 executable for a test or approved local harness with `PI_BENCHMARK_EXECUTABLE`; normal
 runs use `pi`.
 
-A run directory contains `manifest.json`, copied input snapshots, generation Markdown and
-JSON, judgment JSON, pairwise JSON, and `report.md`, `report.json`, and `report.csv`.
-Transcript, golden-summary, candidate, and judge content is written only to the external
-run directory. Do not commit those artifacts. Delete old run directories manually when
-retention is no longer needed; the benchmark never deletes them automatically.
+A run directory contains `manifest.json`, content-addressed transcript and golden-summary
+snapshots, generation Markdown and JSON, judgment JSON, pairwise JSON, and `report.md`,
+`report.json`, and `report.csv`. Judging uses the exact external golden snapshot and records
+its SHA-256; a changed transcript or golden summary invalidates the run before any judge
+RPC. Transcript, golden-summary, candidate, and judge content is written only to the
+external run directory. Do not commit those artifacts. Delete old run directories
+manually when retention is no longer needed; the benchmark never deletes them
+automatically.
 
 ## Workflow
 

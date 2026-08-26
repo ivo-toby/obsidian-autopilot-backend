@@ -99,9 +99,12 @@ def _validate(args: argparse.Namespace) -> int:
 
 def _generate(args: argparse.Namespace) -> int:
     config = load_benchmark_config(args.config)
-    store = _open_or_create_store(config, getattr(args, "resume", None))
-    client = _client()
     filters = _filters(args)
+    store = _open_or_create_store(
+        config, getattr(args, "resume", None), filters
+    )
+    filters = _resume_filters(store, filters)
+    client = _client()
     failed = False
     try:
         artifacts = generate_candidates(
@@ -135,8 +138,11 @@ def _report(args: argparse.Namespace) -> int:
 def _all(args: argparse.Namespace) -> int:
     """generate, judge, and report one benchmark run"""
     config = load_benchmark_config(args.config)
-    store = _open_or_create_store(config, getattr(args, "resume", None))
     filters = _filters(args)
+    store = _open_or_create_store(
+        config, getattr(args, "resume", None), filters
+    )
+    filters = _resume_filters(store, filters)
     client = _client()
     failed = False
     generation_aborted = False
@@ -153,7 +159,8 @@ def _all(args: argparse.Namespace) -> int:
 
     if not (args.fail_fast and generation_aborted):
         try:
-            _judge_store(config, store, args, print_output=False)
+            judge_code = _judge_store(config, store, args, print_output=False)
+            failed = failed or judge_code != 0
         except Exception as error:
             failed = True
             print("judging stopped: %s" % error, file=sys.stderr)
@@ -210,10 +217,105 @@ def _judge_store(
     return 1 if failed else 0
 
 
-def _open_or_create_store(config: Any, resume: Optional[Path]) -> RunStore:
+def _open_or_create_store(
+    config: Any,
+    resume: Optional[Path],
+    filters: Optional[GenerationFilters] = None,
+) -> RunStore:
     if resume is not None:
         return _open_store(resume)
-    return RunStore.create(config.output_dir, config.source)
+    selected = filters or GenerationFilters()
+    _validate_filters(config, selected)
+    scope: Dict[str, object] = {
+        "model_ids": sorted(
+            selected.model_ids or {item.id for item in config.models}
+        ),
+        "prompt_ids": sorted(
+            selected.prompt_ids or {item.id for item in config.prompts}
+        ),
+        "case_ids": sorted(
+            selected.case_ids or {item.id for item in config.cases}
+        ),
+        "splits": sorted(
+            selected.splits or {item.split for item in config.cases}
+        ),
+    }
+    return RunStore.create(
+        config.output_dir,
+        config.source,
+        scope=scope,
+        config_snapshot=_config_snapshot(config),
+    )
+
+
+def _config_snapshot(config: Any) -> Dict[str, object]:
+    return {
+        "version": 1,
+        "output_dir": str(config.output_dir),
+        "generation": {
+            "repetitions": config.generation.repetitions,
+            "thinking": config.generation.thinking,
+            "timeout_seconds": config.generation.timeout_seconds,
+        },
+        "models": [
+            {
+                "id": item.id,
+                "provider": item.provider,
+                "model": item.model,
+                "kind": item.kind,
+            }
+            for item in config.models
+        ],
+        "prompts": [
+            {"id": item.id, "path": str(item.path)} for item in config.prompts
+        ],
+        "cases": [
+            {
+                "id": item.id,
+                "transcript": str(item.transcript),
+                "golden": str(item.golden),
+                "split": item.split,
+            }
+            for item in config.cases
+        ],
+        "judge": {
+            "provider": config.judge.provider,
+            "model": config.judge.model,
+            "thinking": config.judge.thinking,
+            "timeout_seconds": config.judge.timeout_seconds,
+            "pairwise_top_k": config.judge.pairwise_top_k,
+        },
+    }
+
+
+def _resume_filters(
+    store: RunStore, filters: GenerationFilters
+) -> GenerationFilters:
+    if any(
+        value is not None
+        for value in (
+            filters.model_ids,
+            filters.prompt_ids,
+            filters.case_ids,
+            filters.splits,
+        )
+    ):
+        return filters
+    scope = store.manifest.get("scope")
+    if not isinstance(scope, dict):
+        return filters
+    return GenerationFilters(
+        model_ids=_manifest_set(scope.get("model_ids")),
+        prompt_ids=_manifest_set(scope.get("prompt_ids")),
+        case_ids=_manifest_set(scope.get("case_ids")),
+        splits=_manifest_set(scope.get("splits")),
+    )
+
+
+def _manifest_set(value: object):
+    if not isinstance(value, list):
+        return None
+    return {str(item) for item in value}
 
 
 def _open_store(path: Path) -> RunStore:

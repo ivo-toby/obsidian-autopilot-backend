@@ -36,10 +36,19 @@ class RunStore:
         self.manifest = manifest or {}
 
     @classmethod
-    def create(cls, output_dir: Path, config_path: Path) -> "RunStore":
+    def create(
+        cls,
+        output_dir: Path,
+        config_path: Path,
+        scope: Optional[Dict[str, object]] = None,
+        config_snapshot: Optional[Dict[str, object]] = None,
+    ) -> "RunStore":
         output = Path(output_dir).expanduser().resolve()
         output.mkdir(parents=True, exist_ok=True)
-        config = Path(config_path).expanduser().resolve()
+        config_value = config_path
+        if hasattr(config_value, "source"):
+            config_value = getattr(config_value, "source")
+        config = Path(config_value).expanduser().resolve()
         config_bytes = (
             config.read_bytes()
             if config.is_file()
@@ -48,6 +57,16 @@ class RunStore:
         config_hash = sha256_bytes(config_bytes)
         run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         run_dir = output / (run_id + "-" + config_hash[:8])
+        suffix = 1
+        while run_dir.exists():
+            run_dir = output / (
+                "%s-%s-%d" % (
+                    datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"),
+                    config_hash[:8],
+                    suffix,
+                )
+            )
+            suffix += 1
         run_dir.mkdir()
         store = cls(run_dir)
         store.manifest = {
@@ -56,6 +75,10 @@ class RunStore:
             "config_sha256": config_hash,
             "config_path": str(config),
         }
+        if scope is not None:
+            store.manifest["scope"] = scope
+        if config_snapshot is not None:
+            store.manifest["config_snapshot"] = config_snapshot
         store.write_json(Path("manifest.json"), store.manifest)
         return store
 

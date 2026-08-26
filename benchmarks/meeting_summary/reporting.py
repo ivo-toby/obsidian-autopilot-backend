@@ -113,7 +113,7 @@ def build_report(store: RunStore) -> BenchmarkReport:
     raw = _read_artifacts(store)
     generations = _index_generations(raw["generation"])
     judgments = _index_judgments(raw["judgment"])
-    configured = _configured_jobs(config, generations)
+    configured = _configured_jobs(config, generations, store.manifest)
     valid_jobs: Dict[
         Tuple[str, str, str, int], Tuple[Mapping[str, Any], Mapping[str, Any]]
     ] = {}
@@ -181,6 +181,8 @@ def build_report(store: RunStore) -> BenchmarkReport:
     for key, generation in generations.items():
         if key in configured:
             continue
+        if _snapshot(store.manifest) is not None:
+            continue
         if generation.get("status") != "complete":
             failures.append(
                 _failure(
@@ -209,8 +211,11 @@ def build_report(store: RunStore) -> BenchmarkReport:
         if isinstance(judgment.get("result"), Mapping):
             valid_jobs[key] = (generation, judgment)
 
-    pairwise = _complete_pairwise(raw["pairwise"])
-    failures.extend(_pairwise_failures(raw["pairwise"], generations))
+    pairwise_artifacts = _scoped_pairwise(
+        raw["pairwise"], generations, store.manifest
+    )
+    pairwise = _complete_pairwise(pairwise_artifacts)
+    failures.extend(_pairwise_failures(pairwise_artifacts, generations))
     failures.sort(
         key=lambda item: (
             str(item.get("split", "")),
@@ -221,11 +226,11 @@ def build_report(store: RunStore) -> BenchmarkReport:
             str(item.get("stage", "")),
         )
     )
-    keys = _row_keys(config, generations, valid_jobs)
-    rows = _make_rows(keys, valid_jobs, failures, pairwise, config)
+    keys = _row_keys(config, generations, valid_jobs, store.manifest)
+    rows = _make_rows(keys, valid_jobs, failures, pairwise, config, store.manifest)
     tag_counts = _failure_tag_counts(valid_jobs)
     recommendations = _recommendations(valid_jobs)
-    split_coverage = _split_coverage(config, rows)
+    split_coverage = _split_coverage(config, rows, store.manifest)
     report = BenchmarkReport(
         rows=tuple(rows),
         failures=tuple(failures),
@@ -361,7 +366,40 @@ def _index_judgments(
     }
 
 
-def _configured_jobs(config, generations):
+def _snapshot(manifest):
+    if not isinstance(manifest, Mapping):
+        return None
+    value = manifest.get("config_snapshot")
+    return value if isinstance(value, Mapping) else None
+
+
+def _configured_jobs(config, generations, manifest=None):
+    snapshot = _snapshot(manifest)
+    if snapshot is not None:
+        models = [item["id"] for item in snapshot.get("models", [])]
+        prompts = [item["id"] for item in snapshot.get("prompts", [])]
+        cases = [item["id"] for item in snapshot.get("cases", [])]
+        scope = manifest.get("scope", {}) if isinstance(manifest, Mapping) else {}
+        if isinstance(scope, Mapping):
+            models = [item for item in models if item in scope.get("model_ids", models)]
+            prompts = [item for item in prompts if item in scope.get("prompt_ids", prompts)]
+            cases = [item for item in cases if item in scope.get("case_ids", cases)]
+            splits = set(scope.get("splits", []))
+        else:
+            splits = set()
+        case_splits = {
+            item["id"]: item.get("split", "")
+            for item in snapshot.get("cases", [])
+        }
+        cases = [item for item in cases if not splits or case_splits.get(item) in splits]
+        repetitions = int(snapshot.get("generation", {}).get("repetitions", 1))
+        return {
+            (model, prompt, case, repetition)
+            for model in models
+            for prompt in prompts
+            for case in cases
+            for repetition in range(1, repetitions + 1)
+        }
     if config is None:
         return set(generations)
     return {
@@ -373,11 +411,29 @@ def _configured_jobs(config, generations):
     }
 
 
-def _row_keys(config, generations, valid_jobs):
+def _row_keys(config, generations, valid_jobs, manifest=None):
     keys = set()
     for key, values in valid_jobs.items():
         keys.add((key[1], str(values[0].get("split", "")), key[0]))
-    if config is not None:
+    snapshot = _snapshot(manifest)
+    if snapshot is not None:
+        scope = manifest.get("scope", {}) if isinstance(manifest, Mapping) else {}
+        model_ids = [item["id"] for item in snapshot.get("models", [])]
+        prompt_ids = [item["id"] for item in snapshot.get("prompts", [])]
+        cases = snapshot.get("cases", [])
+        if isinstance(scope, Mapping):
+            model_ids = [item for item in model_ids if item in scope.get("model_ids", model_ids)]
+            prompt_ids = [item for item in prompt_ids if item in scope.get("prompt_ids", prompt_ids)]
+            cases = [item for item in cases if item.get("id") in scope.get("case_ids", [item.get("id") for item in cases])]
+            splits = set(scope.get("splits", []))
+            cases = [item for item in cases if not splits or item.get("split") in splits]
+        keys.update(
+            (prompt, case.get("split", ""), model)
+            for model in model_ids
+            for prompt in prompt_ids
+            for case in cases
+        )
+    elif config is not None:
         keys.update(
             (prompt.id, case.split, model.id)
             for model in config.models
@@ -392,9 +448,12 @@ def _row_keys(config, generations, valid_jobs):
     return sorted(keys, key=lambda item: (item[1], item[0], item[2]))
 
 
-def _make_rows(keys, valid_jobs, failures, pairwise, config):
+def _make_rows(keys, valid_jobs, failures, pairwise, config, manifest=None):
+    snapshot = _snapshot(manifest)
     kinds = (
-        {model.id: model.kind for model in config.models} if config is not None else {}
+        {item["id"]: item.get("kind", "candidate") for item in snapshot.get("models", [])}
+        if snapshot is not None
+        else ({model.id: model.kind for model in config.models} if config is not None else {})
     )
     baseline_scores: Dict[Tuple[str, str], float] = {}
     grouped: Dict[
@@ -518,6 +577,41 @@ def _pairwise_counts(model_id, prompt_id, split, jobs, pairwise):
     return tuple(counts)
 
 
+def _scoped_pairwise(artifacts, generations, manifest):
+    if _snapshot(manifest) is None:
+        return artifacts
+    scope = manifest.get("scope", {})
+    if not isinstance(scope, Mapping):
+        return ()
+    model_ids = set(str(item) for item in scope.get("model_ids", []))
+    prompt_ids = set(str(item) for item in scope.get("prompt_ids", []))
+    case_ids = set(str(item) for item in scope.get("case_ids", []))
+    splits = set(str(item) for item in scope.get("splits", []))
+    selected = []
+    for item in artifacts:
+        if (
+            str(item.get("prompt_id", "")) not in prompt_ids
+            or str(item.get("case_id", "")) not in case_ids
+        ):
+            continue
+        if not {str(item.get("model_a_id", "")), str(item.get("model_b_id", ""))}.issubset(model_ids):
+            continue
+        split = next(
+            (
+                str(generation.get("split", ""))
+                for generation in generations.values()
+                if str(generation.get("case_id", "")) == str(item.get("case_id", ""))
+                and str(generation.get("prompt_id", "")) == str(item.get("prompt_id", ""))
+                and int(generation.get("repetition", 0)) == int(item.get("repetition", 0))
+            ),
+            "",
+        )
+        if splits and split not in splits:
+            continue
+        selected.append(item)
+    return tuple(selected)
+
+
 def _complete_pairwise(artifacts):
     return tuple(
         item
@@ -565,11 +659,18 @@ def _leaderboard(rows):
     for row in rows:
         if row.kind != "candidate":
             continue
-        scores.setdefault(row.model_id, []).extend(row.score_values)
-    populated = {model_id: values for model_id, values in scores.items() if values}
+        scores.setdefault((row.split, row.prompt_id, row.model_id), []).extend(
+            row.score_values
+        )
+    populated = {key: values for key, values in scores.items() if values}
     return [
-        {"model_id": model_id, "mean_score": _round(fmean(values))}
-        for model_id, values in sorted(
+        {
+            "split": split,
+            "prompt_id": prompt,
+            "model_id": model,
+            "mean_score": _round(fmean(values)),
+        }
+        for (split, prompt, model), values in sorted(
             populated.items(), key=lambda item: (-fmean(item[1]), item[0])
         )
     ]
@@ -577,7 +678,9 @@ def _leaderboard(rows):
 
 def _failure_tag_counts(valid_jobs):
     result: Dict[str, Dict[str, Dict[str, int]]] = {}
-    for (model, prompt, _case, _rep), (_generation, judgment) in valid_jobs.items():
+    for (model, prompt, _case, _rep), (generation, judgment) in valid_jobs.items():
+        if str(generation.get("split", "")) == "test":
+            continue
         tags = _result(judgment).get("failure_tags", [])
         model_result = result.setdefault(model, {})
         prompt_result = model_result.setdefault(prompt, {})
@@ -589,7 +692,9 @@ def _failure_tag_counts(valid_jobs):
 def _recommendations(valid_jobs):
     result: Dict[str, List[str]] = {}
     seen: Dict[str, set] = {}
-    for _key, (_generation, judgment) in valid_jobs.items():
+    for _key, (generation, judgment) in valid_jobs.items():
+        if str(generation.get("split", "")) == "test":
+            continue
         data = _result(judgment)
         tags = data.get("failure_tags", [])
         recs = data.get("prompt_recommendations", [])
@@ -608,11 +713,16 @@ def _recommendations(valid_jobs):
     return {tag: tuple(values) for tag, values in sorted(result.items())}
 
 
-def _split_coverage(config, rows):
+def _split_coverage(config, rows, manifest=None):
+    snapshot = _snapshot(manifest)
     configured = (
-        {case.split for case in config.cases}
-        if config is not None
-        else {row.split for row in rows}
+        {item.get("split", "") for item in snapshot.get("cases", [])}
+        if snapshot is not None
+        else (
+            {case.split for case in config.cases}
+            if config is not None
+            else {row.split for row in rows}
+        )
     )
     completed = {row.split for row in rows if row.completed_runs}
     required_splits = {"validation", "test"}
