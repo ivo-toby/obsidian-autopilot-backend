@@ -60,6 +60,10 @@ cases:
     provider: test
     model: luna
     kind: baseline
+  - id: other-baseline
+    provider: test
+    model: other
+    kind: baseline
 judge:
   provider: test
   model: judge
@@ -99,7 +103,9 @@ def _generation(
         "model_id": model,
         "provider": "test",
         "model": model,
-        "kind": "baseline" if model == "luna-control" else "candidate",
+        "kind": (
+            "baseline" if model in ("luna-control", "other-baseline") else "candidate"
+        ),
         "thinking": "off",
         "repetition": repetition,
         "elapsed_seconds": elapsed,
@@ -229,6 +235,8 @@ def test_aggregates_scores_failures_latency_tokens_pairwise_and_recommendations(
     for repetition in (1, 2, 3):
         cache = _generation(store, "luna-control", repetition)
         _judgment(store, "luna-control", repetition, cache, score=4)
+    other_baseline_cache = _generation(store, "other-baseline", 1)
+    _judgment(store, "other-baseline", 1, other_baseline_cache, score=5)
     _pairwise(store, "local-a", "luna-control", 1, "A")
     _pairwise(store, "local-a", "luna-control", 2, "tie")
     _pairwise(store, "local-a", "luna-control", 3, "B")
@@ -250,7 +258,7 @@ def test_aggregates_scores_failures_latency_tokens_pairwise_and_recommendations(
     assert report.to_dict()["leaderboard"][0]["model_id"] == "local-b"
     assert report.failure_tags["local-a"]["current"]["missed_action"] == 2
     assert len(report.prompt_recommendations) == 1
-    assert "validation" in report.split_warning
+    assert row.baseline_delta == 0.0
 
 
 def test_split_coverage_warning_and_atomic_report_files(tmp_path):
@@ -274,11 +282,33 @@ def test_split_coverage_warning_and_atomic_report_files(tmp_path):
         "split,prompt_id,model_id,kind,completed_runs,failed_runs,mean_score,score_stddev,critical_errors,mean_factual_accuracy,mean_decisions_and_actions,mean_technical_detail_and_blockers,mean_structure_and_compliance,mean_concision_and_usefulness,mean_latency_seconds,mean_input_tokens,mean_output_tokens,pairwise_wins,pairwise_losses,pairwise_ties,baseline_delta"
     )
     markdown = paths[2].read_text(encoding="utf-8")
-    assert (
-        "Prompt recommendations are development-only. Add at least one validation case and one held-out test case before promoting a prompt."
-        not in markdown
+    warning = "Prompt recommendations are development-only. Add at least one validation case and one held-out test case before promoting a prompt."
+    assert warning in markdown
+    validation_cache = _generation(
+        store, "local-a", 1, split="validation", case="validation-case"
     )
-    assert "Split coverage warning" in markdown
+    _judgment(
+        store,
+        "local-a",
+        1,
+        validation_cache,
+        split="validation",
+        case="validation-case",
+        score=5,
+    )
+    test_cache = _generation(store, "local-a", 1, split="test", case="test-case")
+    _judgment(
+        store,
+        "local-a",
+        1,
+        test_cache,
+        split="test",
+        case="test-case",
+        score=5,
+    )
+    report = build_report(store)
+    assert warning not in report.markdown
+    assert report.split_warning == ""
     assert not list(store.run_dir.glob(".*tmp-*"))
 
 

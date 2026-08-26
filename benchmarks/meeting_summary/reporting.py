@@ -406,7 +406,7 @@ def _make_rows(keys, valid_jobs, failures, pairwise, config):
             (key[1], str(generation.get("split", "")), key[0]), []
         ).append(values)
     for row_key, values in grouped.items():
-        if kinds.get(row_key[2]) == "baseline" or row_key[2] == "luna-control":
+        if row_key[2] == "luna-control":
             scores = [_score(value[1]) for value in values]
             baseline_scores[(row_key[0], row_key[1])] = fmean(scores)
 
@@ -615,8 +615,9 @@ def _split_coverage(config, rows):
         else {row.split for row in rows}
     )
     completed = {row.split for row in rows if row.completed_runs}
-    missing = sorted(({"validation", "test"} & configured) - completed)
-    development_only = configured <= {"development"}
+    required_splits = {"validation", "test"}
+    missing = sorted(required_splits - completed)
+    development_only = not required_splits.issubset(completed)
     return {
         "configured_splits": sorted(configured),
         "completed_splits": sorted(completed),
