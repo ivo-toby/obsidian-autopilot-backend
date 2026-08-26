@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 import benchmarks.meeting_summary.cli as cli_module
 from benchmarks.meeting_summary.cli import main
 
@@ -102,6 +104,44 @@ def test_judge_requires_existing_run_and_report_requires_complete_judgment(
     assert main(["report", "--run-dir", str(missing)]) != 0
 
 
+def test_judge_unknown_filters_fail_before_rpc(tmp_path, monkeypatch):
+    config = _config(tmp_path)
+    run_dir = cli_module.RunStore.create(tmp_path / "runs", config)
+    capture = tmp_path / "capture.json"
+    monkeypatch.setenv("PI_BENCHMARK_EXECUTABLE", str(FAKE_PI))
+    monkeypatch.setenv("FAKE_PI_CAPTURE", str(capture))
+
+    for option in ("model", "prompt", "case", "split"):
+        assert (
+            main(
+                [
+                    "judge",
+                    "--config",
+                    str(config),
+                    "--run-dir",
+                    str(run_dir.run_dir),
+                    "--%s" % option,
+                    "missing",
+                ]
+            )
+            != 0
+        )
+        assert not capture.exists()
+
+
+def test_report_existing_run_without_complete_judgment_writes_files(
+    tmp_path
+):
+    config = _config(tmp_path)
+    run_dir = cli_module.RunStore.create(tmp_path / "runs", config)
+
+    assert main(["report", "--run-dir", str(run_dir.run_dir)]) != 0
+    assert all(
+        (run_dir.run_dir / name).exists()
+        for name in ("report.md", "report.json", "report.csv")
+    )
+
+
 def test_repeatable_filters_and_unknown_filter_fail_before_pi(
     tmp_path, monkeypatch
 ):
@@ -192,6 +232,29 @@ def test_all_calls_phases_in_order(tmp_path, monkeypatch):
 
     assert main(["all", "--config", str(config)]) == 0
     assert phases == ["generation", "absolute", "pairwise", "report"]
+
+
+def test_all_fail_fast_generation_skips_judging_but_writes_report(
+    tmp_path, monkeypatch
+):
+    config = _config(tmp_path, models=("candidate-a",))
+    monkeypatch.setenv("PI_BENCHMARK_EXECUTABLE", str(FAKE_PI))
+    monkeypatch.setenv("FAKE_PI_MODE", "error_stop")
+    monkeypatch.setattr(
+        cli_module,
+        "_judge_store",
+        lambda *args, **kwargs: pytest.fail("judging must not start"),
+    )
+
+    run_code = main(
+        ["all", "--config", str(config), "--fail-fast"]
+    )
+    run_dir = next((tmp_path / "runs").glob("*"))
+    assert run_code != 0
+    assert all(
+        (run_dir / name).exists()
+        for name in ("report.md", "report.json", "report.csv")
+    )
 
 
 def test_resume_reuses_completed_artifacts_and_fail_fast_stops(

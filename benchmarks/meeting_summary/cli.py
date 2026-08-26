@@ -10,7 +10,11 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Sequence
 
 from .config import load_benchmark_config
-from .generation import GenerationFilters, generate_candidates
+from .generation import (
+    GenerationFilters,
+    _validate_filters,
+    generate_candidates,
+)
 from .judging import judge_generations, judge_pairwise_top_models
 from .pi_rpc import PiRpcClient
 from .reporting import build_report, write_report
@@ -113,6 +117,7 @@ def _generate(args: argparse.Namespace) -> int:
 
 def _judge(args: argparse.Namespace) -> int:
     config = load_benchmark_config(args.config)
+    _validate_filters(config, _filters(args))
     store = _open_store(args.run_dir)
     return _judge_store(config, store, args)
 
@@ -134,6 +139,7 @@ def _all(args: argparse.Namespace) -> int:
     filters = _filters(args)
     client = _client()
     failed = False
+    generation_aborted = False
 
     try:
         artifacts = generate_candidates(
@@ -142,13 +148,15 @@ def _all(args: argparse.Namespace) -> int:
         failed = any(artifact.status != "complete" for artifact in artifacts)
     except Exception as error:
         failed = True
+        generation_aborted = True
         print("generation stopped: %s" % error, file=sys.stderr)
 
-    try:
-        _judge_store(config, store, args, print_output=False)
-    except Exception as error:
-        failed = True
-        print("judging stopped: %s" % error, file=sys.stderr)
+    if not (args.fail_fast and generation_aborted):
+        try:
+            _judge_store(config, store, args, print_output=False)
+        except Exception as error:
+            failed = True
+            print("judging stopped: %s" % error, file=sys.stderr)
 
     try:
         report = build_report(store)
@@ -171,10 +179,11 @@ def _judge_store(
     args: argparse.Namespace,
     print_output: bool = True,
 ) -> int:
+    filters = _filters(args)
+    _validate_filters(config, filters)
     client = _client()
     failed = False
     try:
-        filters = _filters(args)
         judge_generations(
             config, store, client, fail_fast=args.fail_fast, filters=filters
         )
