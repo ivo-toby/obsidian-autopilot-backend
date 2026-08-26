@@ -250,11 +250,15 @@ def _substitute(template: str, values: Mapping[str, str]) -> str:
 
 
 def judge_generations(
-    config: BenchmarkConfig, store: RunStore, client
+    config: BenchmarkConfig,
+    store: RunStore,
+    client,
+    fail_fast: bool = False,
+    filters: Optional[object] = None,
 ) -> Tuple[JudgeResult, ...]:
     """Judge all complete generation artifacts, continuing past failures."""
     template = _prompt_template("judge-v1.md")
-    artifacts = _generation_artifacts(store)
+    artifacts = _generation_artifacts(store, filters)
     results: List[JudgeResult] = []
     for artifact in artifacts:
         case = _case(config, artifact.case_id)
@@ -290,6 +294,8 @@ def judge_generations(
         path = store.write_json(_judgment_path(artifact), payload)
         if payload["status"] == "complete":
             results.append(_result_from_payload(store.read_json(path)))
+        elif fail_fast:
+            raise RuntimeError(str(payload.get("error") or "judgment failed"))
     return tuple(results)
 
 
@@ -370,11 +376,15 @@ def _retry_prompt(prompt: str, invalid_response: str) -> str:
 
 
 def judge_pairwise_top_models(
-    config: BenchmarkConfig, store: RunStore, client
+    config: BenchmarkConfig,
+    store: RunStore,
+    client,
+    fail_fast: bool = False,
+    filters: Optional[object] = None,
 ) -> Tuple[PairwiseResult, ...]:
     """Compare the selected local models and the leading configured baseline."""
-    scores = _completed_judgments(store)
-    generation = _generation_artifacts(store)
+    scores = _completed_judgments(store, filters)
+    generation = _generation_artifacts(store, filters)
     by_model: Dict[str, List[float]] = {}
     kinds = {model.id: model.kind for model in config.models}
     for artifact, result in scores:
@@ -474,6 +484,8 @@ def judge_pairwise_top_models(
             path = store.write_json(_pairwise_path(item_a, item_b), payload)
             if result is not None:
                 results.append(_pairwise_from_payload(store.read_json(path)))
+            elif fail_fast:
+                raise RuntimeError(str(payload.get("error") or "pairwise judgment failed"))
     return tuple(results)
 
 
@@ -590,7 +602,9 @@ def _prompt_template(name: str) -> str:
     return (Path(__file__).parent / "prompts" / name).read_text(encoding="utf-8")
 
 
-def _generation_artifacts(store: RunStore) -> Tuple[GenerationArtifact, ...]:
+def _generation_artifacts(
+    store: RunStore, filters: Optional[object] = None
+) -> Tuple[GenerationArtifact, ...]:
     values = []
     root = store.run_dir / "generations"
     for path in sorted(root.rglob("*.json")) if root.is_dir() else ():
@@ -598,12 +612,26 @@ def _generation_artifacts(store: RunStore) -> Tuple[GenerationArtifact, ...]:
             artifact = GenerationArtifact.from_payload(store.read_json(path), path)
         except (KeyError, TypeError, ValueError):
             continue
-        if artifact.status == "complete":
+        if artifact.status == "complete" and _artifact_selected(artifact, filters):
             values.append(artifact)
     return tuple(values)
 
 
-def _completed_judgments(store: RunStore):
+def _artifact_selected(artifact: GenerationArtifact, filters: Optional[object]) -> bool:
+    if filters is None:
+        return True
+    values = (
+        (getattr(filters, "model_ids", None), artifact.model_id),
+        (getattr(filters, "prompt_ids", None), artifact.prompt_id),
+        (getattr(filters, "case_ids", None), artifact.case_id),
+        (getattr(filters, "splits", None), artifact.split),
+    )
+    return all(selected is None or value in selected for selected, value in values)
+
+
+def _completed_judgments(
+    store: RunStore, filters: Optional[object] = None
+):
     values = []
     root = store.run_dir / "judgments"
     for path in sorted(root.rglob("*.json")) if root.is_dir() else ():
@@ -616,7 +644,7 @@ def _completed_judgments(store: RunStore):
         try:
             artifact = next(
                 item
-                for item in _generation_artifacts(store)
+                for item in _generation_artifacts(store, filters)
                 if item.cache_key == payload["generation_cache_key"]
             )
             values.append((artifact, _result_from_payload(payload)))

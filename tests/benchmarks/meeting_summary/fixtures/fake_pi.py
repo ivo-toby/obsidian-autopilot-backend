@@ -61,6 +61,33 @@ def main() -> None:
 
     stop_reason = "stop"
     text = "# Summary"
+    if MODE == "valid_judgment":
+        if "winner" in command.get("message", ""):
+            text = json.dumps(
+                {
+                    "winner": "tie",
+                    "reason": "Both summaries are equivalent.",
+                    "critical_difference": "none",
+                    "confidence": 3,
+                }
+            )
+        else:
+            text = json.dumps(
+                {
+                    "scores": {
+                        "factual_accuracy": 4,
+                        "decisions_and_actions": 4,
+                        "technical_detail_and_blockers": 4,
+                        "structure_and_compliance": 4,
+                        "concision_and_usefulness": 4,
+                    },
+                    "critical_errors": [],
+                    "missed_items": [],
+                    "failure_tags": [],
+                    "prompt_recommendations": [],
+                    "verdict": "acceptable",
+                }
+            )
     if MODE == "error_stop":
         stop_reason = "error"
     elif MODE == "empty_text":
