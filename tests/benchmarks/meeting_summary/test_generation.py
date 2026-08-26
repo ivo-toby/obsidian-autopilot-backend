@@ -20,9 +20,16 @@ from benchmarks.meeting_summary.types import (
 
 
 class StubPiRpcClient:
-    def __init__(self, fail_models=None):
+    def __init__(
+        self,
+        fail_models=None,
+        response_provider=None,
+        response_model=None,
+    ):
         self.requests = []
         self.fail_models = set(fail_models or ())
+        self.response_provider = response_provider
+        self.response_model = response_model
 
     def run(self, request):
         self.requests.append(request)
@@ -30,8 +37,8 @@ class StubPiRpcClient:
             raise RuntimeError("stub failure")
         return PiResponse(
             text="# Summary\nGenerated",
-            provider=request.provider,
-            model=request.model,
+            provider=self.response_provider or request.provider,
+            model=self.response_model or request.model,
             stop_reason="stop",
             usage={"input": 3, "output": 2},
             session_tokens={"total": 5},
@@ -197,6 +204,112 @@ def test_prompt_and_transcript_content_changes_invalidate_only_related_jobs(
         )
         if key == ("variant", "other", "candidate", artifact.repetition):
             assert artifact.cache_key == old_by_job[key]
+
+
+def test_prompt_only_change_invalidates_prompt_jobs_and_not_baseline_others(
+    tmp_path: Path,
+):
+    config = make_config(tmp_path)
+    store = RunStore.create(config.output_dir, config.source)
+    first = generate_candidates(config, store, None, StubPiRpcClient())
+    config.prompts[0].path.write_text("PROMPT CHANGED", encoding="utf-8")
+    client = StubPiRpcClient()
+
+    second = generate_candidates(config, store, None, client)
+
+    assert len(client.requests) == 2 * 2 * 3
+    assert all(
+        request.prompt.startswith("PROMPT CHANGED")
+        for request in client.requests
+    )
+    old_keys = {
+        (a.model_id, a.prompt_id, a.case_id, a.repetition): a.cache_key
+        for a in first
+    }
+    for artifact in second:
+        key = (
+            artifact.model_id,
+            artifact.prompt_id,
+            artifact.case_id,
+            artifact.repetition,
+        )
+        if artifact.prompt_id == "variant":
+            assert artifact.cache_key == old_keys[key]
+        if artifact.model_id == "baseline" and artifact.prompt_id == "variant":
+            assert artifact.cache_key == old_keys[key]
+
+
+def test_transcript_only_change_invalidates_jobs_and_not_baseline_others(
+    tmp_path: Path,
+):
+    config = make_config(tmp_path)
+    store = RunStore.create(config.output_dir, config.source)
+    first = generate_candidates(config, store, None, StubPiRpcClient())
+    config.cases[0].transcript.write_text(
+        "TRANSCRIPT CHANGED", encoding="utf-8"
+    )
+    client = StubPiRpcClient()
+
+    second = generate_candidates(config, store, None, client)
+
+    assert len(client.requests) == 2 * 2 * 3
+    assert all(
+        "TRANSCRIPT CHANGED" in request.prompt for request in client.requests
+    )
+    old_keys = {
+        (a.model_id, a.prompt_id, a.case_id, a.repetition): a.cache_key
+        for a in first
+    }
+    for artifact in second:
+        key = (
+            artifact.model_id,
+            artifact.prompt_id,
+            artifact.case_id,
+            artifact.repetition,
+        )
+        if artifact.case_id == "other":
+            assert artifact.cache_key == old_keys[key]
+        if artifact.model_id == "baseline" and artifact.case_id == "other":
+            assert artifact.cache_key == old_keys[key]
+
+
+def test_mismatched_response_is_failed_and_retried_on_resume(tmp_path: Path):
+    config = make_config(tmp_path)
+    store = RunStore.create(config.output_dir, config.source)
+    filters = GenerationFilters(model_ids={"candidate"}, case_ids={"sync"})
+    mismatched = StubPiRpcClient(
+        response_provider="wrong-provider", response_model="wrong-model"
+    )
+
+    first = generate_candidates(config, store, filters, mismatched)
+
+    assert all(artifact.status == "failed" for artifact in first)
+    assert all(
+        "does not match requested" in artifact.error for artifact in first
+    )
+    retry = StubPiRpcClient()
+    second = generate_candidates(config, store, filters, retry)
+    assert len(retry.requests) == len(first)
+    assert all(artifact.status == "complete" for artifact in second)
+
+
+def test_mismatched_completed_artifact_is_not_reused_on_resume(tmp_path: Path):
+    config = make_config(tmp_path)
+    store = RunStore.create(config.output_dir, config.source)
+    filters = GenerationFilters(model_ids={"candidate"}, case_ids={"sync"})
+    first = generate_candidates(config, store, filters, StubPiRpcClient())
+    payload = store.read_json(first[0].artifact_path)
+    payload["provider"] = "wrong-provider"
+    store.write_json(
+        first[0].artifact_path.relative_to(store.run_dir), payload
+    )
+    retry = StubPiRpcClient()
+
+    second = generate_candidates(config, store, filters, retry)
+
+    assert len(retry.requests) == 1
+    assert second[0].status == "complete"
+    assert second[0].provider == "homelab"
 
 
 def test_artifact_payload_and_composed_request_are_persisted(tmp_path: Path):

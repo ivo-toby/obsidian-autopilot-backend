@@ -174,12 +174,12 @@ def generate_candidates(
                         "generation", job.cache_key
                     )
                     if cached_path is not None:
-                        artifacts.append(
-                            GenerationArtifact.from_payload(
-                                store.read_json(cached_path), cached_path
-                            )
+                        cached = GenerationArtifact.from_payload(
+                            store.read_json(cached_path), cached_path
                         )
-                        continue
+                        if _artifact_matches_job(cached, job):
+                            artifacts.append(cached)
+                            continue
                     try:
                         response = client.run(
                             PiRequest(
@@ -194,6 +194,7 @@ def generate_candidates(
                                 ),
                             )
                         )
+                        _validate_response_identity(job, response)
                         artifact = _complete_artifact(job, response)
                         store.write_text(
                             Path(artifact.summary_path), response.text
@@ -268,6 +269,41 @@ def _make_job(
     )
 
 
+def _validate_response_identity(
+    job: GenerationJob, response: PiResponse
+) -> None:
+    if response.provider != job.provider or response.model != job.model:
+        raise ValueError(
+            "RPC response identity does not match requested provider/model: "
+            "%s/%s != %s/%s"
+            % (response.provider, response.model, job.provider, job.model)
+        )
+
+
+def _artifact_matches_job(
+    artifact: GenerationArtifact, job: GenerationJob
+) -> bool:
+    expected = {
+        "schema_version": BENCHMARK_SCHEMA_VERSION,
+        "operation": "generation",
+        "cache_key": job.cache_key,
+        "case_id": job.case_id,
+        "split": job.split,
+        "prompt_id": job.prompt_id,
+        "prompt_sha256": job.prompt_sha256,
+        "transcript_sha256": job.transcript_sha256,
+        "model_id": job.model_id,
+        "provider": job.provider,
+        "model": job.model,
+        "kind": job.kind,
+        "thinking": job.thinking,
+        "repetition": job.repetition,
+    }
+    return all(
+        getattr(artifact, field) == value for field, value in expected.items()
+    )
+
+
 def _complete_artifact(
     job: GenerationJob, response: PiResponse
 ) -> GenerationArtifact:
@@ -282,8 +318,8 @@ def _complete_artifact(
         prompt_sha256=job.prompt_sha256,
         transcript_sha256=job.transcript_sha256,
         model_id=job.model_id,
-        provider=response.provider,
-        model=response.model,
+        provider=job.provider,
+        model=job.model,
         kind=job.kind,
         thinking=job.thinking,
         repetition=job.repetition,
