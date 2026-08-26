@@ -1,0 +1,66 @@
+version: 1
+output_dir: ~/cf-notes/benchmarks/meeting-summary
+
+generation:
+  repetitions: 3
+  thinking: off
+  timeout_seconds: 900
+
+prompts:
+  - id: current
+    path: ../../prompts/MEETING_PROMPT.md
+
+cases:
+  - id: core-ai-agents-sync
+    transcript: ~/cf-notes/transcripts/2026-06-11-core-ai-agents-sync.md
+    golden: ~/cf-notes/golden-summary.md
+    split: development
+
+models:
+  - id: qwen35-9b
+    provider: homelab
+    model: m5/omlx/Qwen3.5-9B-OptiQ-4bit
+    kind: candidate
+  - id: ternary-bonsai-27b
+    provider: homelab
+    model: m5/omlx/Ternary-Bonsai-27B-mlx-2bit
+    kind: candidate
+  - id: gemma4-12b
+    provider: homelab
+    model: titan/ollama/gemma4:12b
+    kind: candidate
+  - id: gemma4-26b
+    provider: homelab
+    model: titan/ollama/gemma4:26b
+    kind: candidate
+  - id: gemma4-e4b
+    provider: homelab
+    model: m5/omlx/gemma-4-e4b-it-OptiQ-4bit
+    kind: candidate
+  - id: magistral
+    provider: homelab
+    model: titan/ollama/magistral:latest
+    kind: candidate
+  - id: muse-glimmer
+    provider: homelab
+    model: titan/ollama/muse-glimmer:latest
+    kind: candidate
+  - id: qwen38
+    provider: homelab
+    model: titan/ollama/qwen3.8:latest
+    kind: candidate
+  - id: strongbad-qwen36-35b
+    provider: strongbad
+    model: Qwen3.6-35B-A3B-UD-Q5_K_XL.gguf
+    kind: candidate
+  - id: luna-control
+    provider: openai-codex
+    model: gpt-5.6-luna
+    kind: baseline
+
+judge:
+  provider: openai-codex
+  model: gpt-5.6-sol
+  thinking: high
+  timeout_seconds: 900
+  pairwise_top_k: 3
