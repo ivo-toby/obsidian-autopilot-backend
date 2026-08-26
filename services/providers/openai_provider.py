@@ -40,13 +40,11 @@ class OpenAIProvider(BaseProvider):
             self.model = (
                 openai_config.get("model") or inference_config.get("model") or "gpt-4o"
             )
-            self.temperature = openai_config.get("temperature", 0.7)
         else:
             # Legacy config format - fall back to env if not in config
             self.api_key = config.get("api_key") or os.environ.get("OPENAI_API_KEY", "")
             self.base_url = config.get("base_url")
             self.model = config.get("model", "gpt-4o")
-            self.temperature = config.get("temperature", 0.7)
 
         self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
         logger.info(f"Initialized OpenAI provider with model: {self.model}")
@@ -57,18 +55,15 @@ class OpenAIProvider(BaseProvider):
 
         Args:
             prompt (str): The input prompt
-            **kwargs: Additional parameters (temperature, etc.)
+            **kwargs: Additional provider-specific parameters
 
         Returns:
             str: Generated text response
         """
         try:
-            temperature = kwargs.get("temperature", self.temperature)
-
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=temperature,
             )
             return response.choices[0].message.content or ""
         except Exception as e:
@@ -83,18 +78,15 @@ class OpenAIProvider(BaseProvider):
 
         Args:
             messages (List[Dict[str, str]]): List of message dictionaries
-            **kwargs: Additional parameters (temperature, etc.)
+            **kwargs: Additional provider-specific parameters
 
         Returns:
             Dict[str, Any]: Response dictionary
         """
         try:
-            temperature = kwargs.get("temperature", self.temperature)
-
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                temperature=temperature,
             )
 
             return {
@@ -126,11 +118,8 @@ class OpenAIProvider(BaseProvider):
             Optional[Dict[str, Any]]: Response message with function call or None
         """
         try:
-            temperature = kwargs.get("temperature", self.temperature)
-
             response = self.client.chat.completions.create(
                 model=self.model,
-                temperature=temperature,
                 messages=messages,
                 functions=functions,
                 function_call=function_call,
