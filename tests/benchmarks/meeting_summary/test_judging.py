@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+import benchmarks.meeting_summary.judging as judging_module
 from benchmarks.meeting_summary.generation import GenerationFilters, generate_candidates
 from benchmarks.meeting_summary.judging import (
     VALID_SCORE_FIELDS,
@@ -149,6 +150,8 @@ def test_prompt_is_anonymous_and_authoritative(tmp_path: Path):
     assert "model-0" not in request.prompt
     assert "local" not in request.prompt
     assert "The transcript is authoritative" in request.prompt
+    assert "Decisions must be explicit outcomes" in request.prompt
+    assert "Omit empty, generic, or fluff sections" in request.prompt
 
 
 def test_invalid_json_gets_one_retry_and_failure_is_cached(tmp_path: Path):
@@ -190,6 +193,81 @@ def test_pairwise_placement_is_stable_and_balanced():
         for repetition in range(40)
     ]
     assert set(placements) == {("a", "b"), ("b", "a")}
+    counts = {placement: placements.count(placement) for placement in set(placements)}
+    assert abs(counts[("a", "b")] - counts[("b", "a")]) <= 1
+
+
+def test_judgment_cache_invalidates_when_judge_settings_change(tmp_path: Path):
+    config = make_config(tmp_path, model_count=1)
+    store = RunStore.create(config.output_dir, config.source)
+    generate_candidates(
+        config,
+        store,
+        GenerationFilters(model_ids={"model-0"}),
+        StubClient(["summary", "summary"]),
+    )
+    first_client = StubClient([json.dumps(VALID_JUDGMENT)] * 2)
+    judge_generations(config, store, first_client)
+    changed = BenchmarkConfig(
+        source=config.source,
+        output_dir=config.output_dir,
+        generation=config.generation,
+        prompts=config.prompts,
+        cases=config.cases,
+        models=config.models,
+        judge=JudgeSpec("other-judge", "other-model", "low", 10, 2),
+    )
+    second_client = StubClient([json.dumps(VALID_JUDGMENT)] * 2)
+    judge_generations(changed, store, second_client)
+    assert len(second_client.requests) == 2
+
+
+def test_pairwise_cache_invalidates_on_judge_settings_and_prompt_changes(
+    tmp_path: Path, monkeypatch
+):
+    config = make_config(tmp_path, model_count=2)
+    store = RunStore.create(config.output_dir, config.source)
+    generation = generate_candidates(config, store, None, StubClient(["summary"] * 6))
+    judge_generations(
+        config, store, StubClient([json.dumps(VALID_JUDGMENT)] * len(generation))
+    )
+    pairwise_response = json.dumps(
+        {
+            "winner": "A",
+            "reason": "A is clearer",
+            "critical_difference": "none",
+            "confidence": 4,
+        }
+    )
+    first_client = StubClient([pairwise_response] * 4)
+    judge_pairwise_top_models(config, store, first_client)
+    changed = BenchmarkConfig(
+        source=config.source,
+        output_dir=config.output_dir,
+        generation=config.generation,
+        prompts=config.prompts,
+        cases=config.cases,
+        models=config.models,
+        judge=JudgeSpec("other-judge", "other-model", "low", 10, 2),
+    )
+    monkeypatch.setattr(judging_module, "PAIRWISE_PROMPT_VERSION", "pairwise-v2")
+    second_client = StubClient([pairwise_response] * 4)
+    judge_pairwise_top_models(changed, store, second_client)
+    assert len(second_client.requests) == 4
+
+    original_template = judging_module._prompt_template
+    monkeypatch.setattr(
+        judging_module,
+        "_prompt_template",
+        lambda name: (
+            original_template(name) + "\nversion change"
+            if name == "pairwise-v1.md"
+            else original_template(name)
+        ),
+    )
+    third_client = StubClient([pairwise_response] * 4)
+    judge_pairwise_top_models(changed, store, third_client)
+    assert len(third_client.requests) == 4
 
 
 def test_pairwise_judge_has_no_identity_and_normalizes_winner(tmp_path: Path):

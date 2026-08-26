@@ -14,6 +14,9 @@ from .pi_rpc import PiRequest
 from .storage import RunStore, canonical_json_hash, sha256_text
 from .types import BenchmarkConfig, ScoreSet
 
+JUDGE_PROMPT_VERSION = "judge-v1"
+PAIRWISE_PROMPT_VERSION = "pairwise-v1"
+
 VALID_SCORE_FIELDS = (
     "factual_accuracy",
     "decisions_and_actions",
@@ -262,11 +265,17 @@ def judge_generations(
         prompt = render_judge_prompt(template, transcript, golden, candidate)
         cache_key = canonical_json_hash(
             {
+                "schema_version": 1,
                 "operation": "judgment",
+                "prompt_version": JUDGE_PROMPT_VERSION,
                 "generation_cache_key": artifact.cache_key,
+                "transcript_sha256": sha256_text(transcript),
+                "golden_sha256": sha256_text(golden),
+                "candidate_sha256": sha256_text(candidate),
                 "judge_provider": config.judge.provider,
                 "judge_model": config.judge.model,
                 "judge_thinking": config.judge.thinking,
+                "judge_timeout_seconds": config.judge.timeout_seconds,
                 "prompt_sha256": sha256_text(prompt),
             }
         )
@@ -428,13 +437,23 @@ def judge_pairwise_top_models(
             )
             cache_key = canonical_json_hash(
                 {
+                    "schema_version": 1,
                     "operation": "pairwise",
+                    "prompt_version": PAIRWISE_PROMPT_VERSION,
                     "models": sorted((model_a, model_b)),
                     "case_id": item_a.case_id,
                     "prompt_id": item_a.prompt_id,
                     "repetition": item_a.repetition,
                     "summary_a": item_a.cache_key,
                     "summary_b": item_b.cache_key,
+                    "transcript_sha256": sha256_text(transcript),
+                    "golden_sha256": sha256_text(golden),
+                    "summary_a_sha256": sha256_text(text_a),
+                    "summary_b_sha256": sha256_text(text_b),
+                    "judge_provider": config.judge.provider,
+                    "judge_model": config.judge.model,
+                    "judge_thinking": config.judge.thinking,
+                    "judge_timeout_seconds": config.judge.timeout_seconds,
                     "prompt_sha256": sha256_text(prompt),
                 }
             )

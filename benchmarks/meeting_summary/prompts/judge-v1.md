@@ -9,6 +9,13 @@ Score each dimension with an integer from 1 through 5:
 - `structure_and_compliance` (10%): check `MEETING_PROMPT.md` section rules and omission of empty/generic sections.
 - `concision_and_usefulness` (10%): reward information density and penalize repetition or transcript-like retelling.
 
+Structure and quality contract for this meeting summary:
+- Start with `# [Meeting Name/Purpose]` and use only sections that have specific, valuable content.
+- Available sections are `## Context`, `## Key Outcomes`, `## Technical Challenges Discussed`, `## Sprint/Work Updates`, `## Decisions Made`, `## Action Items`, `## Blockers & Dependencies`, `## Team Coordination Notes`, and `## Follow-up Required`.
+- Technical challenges may contain `Problem`, `Impact`, `Current State`, `Proposed Solutions`, and `Status`; include concrete technical details and numbers when present.
+- Decisions must be explicit outcomes with rationale and implementer. Action items must be concrete commitments with clear owner and timeline. Do not turn proposals into decisions or vague discussion into actions.
+- Omit empty, generic, or fluff sections. Preserve actual terminology, metrics, costs, timelines, blockers, dependencies, and relevant team coordination details. Prefer specific outcomes over transcript-like retelling.
+
 Allowed failure tags only:
 `hallucinated_fact`, `wrong_owner`, `wrong_timeline`, `proposal_as_decision`, `missed_decision`, `missed_action`, `missed_blocker`, `terminology_error`, `structure_violation`, `too_verbose`, `too_sparse`.
 
