@@ -206,6 +206,45 @@ def test_prompt_and_transcript_content_changes_invalidate_only_related_jobs(
             assert artifact.cache_key == old_by_job[key]
 
 
+def test_candidate_variant_change_preserves_baseline_artifacts(
+    tmp_path: Path,
+):
+    config = make_config(tmp_path)
+    store = RunStore.create(config.output_dir, config.source)
+    generate_candidates(config, store, None, StubPiRpcClient())
+    baseline_before = {
+        path.relative_to(store.run_dir): store.read_json(path)
+        for path in (store.run_dir / "generations").rglob("*.json")
+        if store.read_json(path)["model_id"] == "baseline"
+    }
+    config.prompts[1].path.write_text("VARIANT CHANGED", encoding="utf-8")
+    client = StubPiRpcClient()
+
+    second = generate_candidates(
+        config,
+        store,
+        GenerationFilters(model_ids={"candidate"}, prompt_ids={"variant"}),
+        client,
+    )
+
+    assert len(client.requests) == 2 * 3
+    assert all(
+        request.model == "candidate-model" for request in client.requests
+    )
+    assert all(artifact.model_id == "candidate" for artifact in second)
+    baseline_after = {
+        path.relative_to(store.run_dir): store.read_json(path)
+        for path in (store.run_dir / "generations").rglob("*.json")
+        if store.read_json(path)["model_id"] == "baseline"
+    }
+    assert baseline_after.keys() == baseline_before.keys()
+    assert {
+        path: payload["cache_key"] for path, payload in baseline_after.items()
+    } == {
+        path: payload["cache_key"] for path, payload in baseline_before.items()
+    }
+
+
 def test_prompt_only_change_invalidates_prompt_jobs_and_not_baseline_others(
     tmp_path: Path,
 ):
