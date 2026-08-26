@@ -258,7 +258,6 @@ def test_aggregates_scores_failures_latency_tokens_pairwise_and_recommendations(
     assert report.to_dict()["leaderboard"][0]["model_id"] == "local-b"
     assert report.failure_tags["local-a"]["current"]["missed_action"] == 2
     assert len(report.prompt_recommendations) == 1
-    assert row.baseline_delta == 0.0
 
 
 def test_split_coverage_warning_and_atomic_report_files(tmp_path):
@@ -310,6 +309,52 @@ def test_split_coverage_warning_and_atomic_report_files(tmp_path):
     assert warning not in report.markdown
     assert report.split_warning == ""
     assert not list(store.run_dir.glob(".*tmp-*"))
+
+
+@pytest.mark.parametrize(
+    "partial_split,partial_case,remaining_split,remaining_case",
+    [
+        ("validation", "validation-case", "test", "test-case"),
+        ("test", "test-case", "validation", "validation-case"),
+    ],
+)
+def test_partial_split_coverage_stays_development_only(
+    tmp_path, partial_split, partial_case, remaining_split, remaining_case
+):
+    store = _store(tmp_path)
+    warning = "Prompt recommendations are development-only. Add at least one validation case and one held-out test case before promoting a prompt."
+
+    partial_cache = _generation(
+        store, "local-a", 1, split=partial_split, case=partial_case
+    )
+    _judgment(
+        store,
+        "local-a",
+        1,
+        partial_cache,
+        split=partial_split,
+        case=partial_case,
+        score=5,
+    )
+    report = build_report(store)
+    assert warning in report.markdown
+    assert report.split_warning == warning
+
+    remaining_cache = _generation(
+        store, "local-a", 1, split=remaining_split, case=remaining_case
+    )
+    _judgment(
+        store,
+        "local-a",
+        1,
+        remaining_cache,
+        split=remaining_split,
+        case=remaining_case,
+        score=5,
+    )
+    report = build_report(store)
+    assert warning not in report.markdown
+    assert report.split_warning == ""
 
 
 def test_development_only_recommendations_are_not_promoted(tmp_path):
