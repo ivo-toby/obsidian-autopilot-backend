@@ -60,7 +60,8 @@ class RunStore:
         suffix = 1
         while run_dir.exists():
             run_dir = output / (
-                "%s-%s-%d" % (
+                "%s-%s-%d"
+                % (
                     datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"),
                     config_hash[:8],
                     suffix,

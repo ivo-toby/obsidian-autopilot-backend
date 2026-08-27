@@ -12,7 +12,6 @@ import pytest
 import benchmarks.meeting_summary.cli as cli_module
 from benchmarks.meeting_summary.cli import main
 
-
 ROOT = Path(__file__).resolve().parents[3]
 FAKE_PI = Path(__file__).with_name("fixtures") / "fake_pi.py"
 
@@ -29,8 +28,7 @@ def _config(tmp_path, models=("candidate-a", "candidate-b", "luna-control")):
         kind = "baseline" if model == "luna-control" else "candidate"
         model_lines.append(
             "  - id: %s\n    provider: homelab\n"
-            "    model: titan/ollama/gemma4:12b\n    kind: %s"
-            % (model, kind)
+            "    model: titan/ollama/gemma4:12b\n    kind: %s" % (model, kind)
         )
     config = tmp_path / "benchmark.yaml"
     config.write_text(
@@ -129,9 +127,7 @@ def test_judge_unknown_filters_fail_before_rpc(tmp_path, monkeypatch):
         assert not capture.exists()
 
 
-def test_report_existing_run_without_complete_judgment_writes_files(
-    tmp_path
-):
+def test_report_existing_run_without_complete_judgment_writes_files(tmp_path):
     config = _config(tmp_path)
     run_dir = cli_module.RunStore.create(tmp_path / "runs", config)
 
@@ -150,28 +146,31 @@ def test_repeatable_filters_and_unknown_filter_fail_before_pi(
     monkeypatch.setenv("PI_BENCHMARK_EXECUTABLE", str(FAKE_PI))
     monkeypatch.setenv("FAKE_PI_CAPTURE", str(capture))
 
-    assert main(
-        [
-            "generate",
-            "--config",
-            str(config),
-            "--model",
-            "candidate-a",
-            "--model",
-            "candidate-b",
-            "--prompt",
-            "current",
-            "--case",
-            "case",
-            "--split",
-            "development",
-        ]
-    ) == 0
+    assert (
+        main(
+            [
+                "generate",
+                "--config",
+                str(config),
+                "--model",
+                "candidate-a",
+                "--model",
+                "candidate-b",
+                "--prompt",
+                "current",
+                "--case",
+                "case",
+                "--split",
+                "development",
+            ]
+        )
+        == 0
+    )
     assert capture.exists()
     capture.unlink()
-    assert main(
-        ["generate", "--config", str(config), "--model", "missing"]
-    ) != 0
+    assert (
+        main(["generate", "--config", str(config), "--model", "missing"]) != 0
+    )
     assert not capture.exists()
 
 
@@ -246,9 +245,7 @@ def test_all_fail_fast_generation_skips_judging_but_writes_report(
         lambda *args, **kwargs: pytest.fail("judging must not start"),
     )
 
-    run_code = main(
-        ["all", "--config", str(config), "--fail-fast"]
-    )
+    run_code = main(["all", "--config", str(config), "--fail-fast"])
     run_dir = next((tmp_path / "runs").glob("*"))
     assert run_code != 0
     assert all(

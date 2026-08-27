@@ -39,9 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
     validate.set_defaults(handler=_validate)
 
     for name, handler in (("generate", _generate), ("all", _all)):
-        command = commands.add_parser(
-            name, help=handler.__doc__
-        )
+        command = commands.add_parser(name, help=handler.__doc__)
         _add_config_options(command)
         command.set_defaults(handler=handler)
 
@@ -66,9 +64,7 @@ def _add_config_options(
         parser.add_argument(
             "--resume", type=Path, help="reuse an existing run directory"
         )
-    parser.add_argument(
-        "--model", action="append", dest="models", default=[]
-    )
+    parser.add_argument("--model", action="append", dest="models", default=[])
     parser.add_argument(
         "--prompt", action="append", dest="prompts", default=[]
     )
@@ -386,9 +382,7 @@ def _payload_selected(
     if split is None:
         case_id = str(payload.get("case_id", ""))
         split = next(
-            (
-                case.split for case in config.cases if case.id == case_id
-            ),
+            (case.split for case in config.cases if case.id == case_id),
             None,
         )
     values = (

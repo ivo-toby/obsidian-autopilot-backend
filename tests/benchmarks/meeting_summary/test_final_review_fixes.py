@@ -64,7 +64,9 @@ def test_stale_generation_fails_before_judge_rpc(tmp_path):
     config = make_judge_config(tmp_path, model_count=1)
     store = RunStore.create(config.output_dir, config.source)
     generate_candidates(config, store, None, StubClient(["summary"] * 4))
-    config.cases[0].transcript.write_text("mutated transcript", encoding="utf-8")
+    config.cases[0].transcript.write_text(
+        "mutated transcript", encoding="utf-8"
+    )
     client = StubClient([json.dumps(VALID_JUDGMENT)])
 
     assert judge_generations(config, store, client) == ()
@@ -119,7 +121,9 @@ def test_report_leaderboard_and_recommendations_are_split_prompt_safe(
     assert "missed_action" in report.prompt_recommendations
 
 
-def test_filtered_all_report_scope_survives_config_mutation(tmp_path, monkeypatch):
+def test_filtered_all_report_scope_survives_config_mutation(
+    tmp_path, monkeypatch
+):
     from .test_cli import _config
 
     config = _config(
@@ -164,7 +168,9 @@ def test_filtered_all_report_scope_survives_config_mutation(tmp_path, monkeypatc
         == 0
     )
     run_dir = next((tmp_path / "runs").glob("*"))
-    manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+    manifest = json.loads(
+        (run_dir / "manifest.json").read_text(encoding="utf-8")
+    )
     assert manifest["scope"] == {
         "model_ids": ["candidate-a"],
         "prompt_ids": ["current"],
@@ -187,7 +193,8 @@ def test_filtered_all_report_scope_survives_config_mutation(tmp_path, monkeypatc
     assert cli_module.main(["report", "--run-dir", str(run_dir)]) == 0
     report = json.loads((run_dir / "report.json").read_text(encoding="utf-8"))
     assert {
-        (row["model_id"], row["prompt_id"], row["split"]) for row in report["rows"]
+        (row["model_id"], row["prompt_id"], row["split"])
+        for row in report["rows"]
     } == {("candidate-a", "current", "development")}
     assert report["split_coverage"] == {
         "configured_splits": ["development"],
@@ -202,7 +209,9 @@ def test_all_propagates_nonzero_judge_status(tmp_path, monkeypatch):
 
     config = _config(tmp_path, models=("candidate-a",))
     store = cli_module.RunStore.create(tmp_path / "runs", config)
-    monkeypatch.setattr(cli_module, "_open_or_create_store", lambda *args: store)
+    monkeypatch.setattr(
+        cli_module, "_open_or_create_store", lambda *args: store
+    )
     monkeypatch.setattr(
         cli_module,
         "generate_candidates",
@@ -221,10 +230,14 @@ def test_all_propagates_nonzero_judge_status(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("transcript_hash", ["stale", "missing"])
-def test_pairwise_rejects_stale_or_missing_item_b_transcript(tmp_path, transcript_hash):
+def test_pairwise_rejects_stale_or_missing_item_b_transcript(
+    tmp_path, transcript_hash
+):
     config = make_judge_config(tmp_path, model_count=1)
     store = RunStore.create(config.output_dir, config.source)
-    generation = generate_candidates(config, store, None, StubClient(["summary"] * 4))
+    generation = generate_candidates(
+        config, store, None, StubClient(["summary"] * 4)
+    )
     judge_generations(
         config,
         store,
@@ -236,10 +249,14 @@ def test_pairwise_rejects_stale_or_missing_item_b_transcript(tmp_path, transcrip
         payload["transcript_sha256"] = (
             "stale-transcript-hash" if transcript_hash == "stale" else "0" * 64
         )
-        store.write_json(item_b.artifact_path.relative_to(store.run_dir), payload)
+        store.write_json(
+            item_b.artifact_path.relative_to(store.run_dir), payload
+        )
 
     client = StubClient([])
-    assert judging_module.judge_pairwise_top_models(config, store, client) == ()
+    assert (
+        judging_module.judge_pairwise_top_models(config, store, client) == ()
+    )
     assert client.requests == []
     pairwise = list((store.run_dir / "pairwise").rglob("*.json"))
     assert pairwise and all(

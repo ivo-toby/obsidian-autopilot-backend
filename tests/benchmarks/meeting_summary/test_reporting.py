@@ -73,7 +73,13 @@ judge:
 """,
         encoding="utf-8",
     )
-    for name in ("prompt.md", "dev.md", "validation.md", "test.md", "golden.md"):
+    for name in (
+        "prompt.md",
+        "dev.md",
+        "validation.md",
+        "test.md",
+        "golden.md",
+    ):
         (tmp_path / name).write_text(name, encoding="utf-8")
     return RunStore.create(tmp_path / "runs", config)
 
@@ -104,12 +110,17 @@ def _generation(
         "provider": "test",
         "model": model,
         "kind": (
-            "baseline" if model in ("luna-control", "other-baseline") else "candidate"
+            "baseline"
+            if model in ("luna-control", "other-baseline")
+            else "candidate"
         ),
         "thinking": "off",
         "repetition": repetition,
         "elapsed_seconds": elapsed,
-        "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens},
+        "usage": {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+        },
         "session_tokens": {},
         "stop_reason": "stop",
         "summary_path": "summaries/%s-%s.md" % (model, repetition),
@@ -170,16 +181,24 @@ def _judgment(
             ],
             "missed_items": [],
             "failure_tags": list(tags),
-            "prompt_recommendations": ["Require explicit owners"] if tags else [],
+            "prompt_recommendations": (
+                ["Require explicit owners"] if tags else []
+            ),
             "verdict": "ok",
         }
     store.write_json(
-        Path("judgments") / model / prompt / case / ("repetition-%d.json" % repetition),
+        Path("judgments")
+        / model
+        / prompt
+        / case
+        / ("repetition-%d.json" % repetition),
         payload,
     )
 
 
-def _pairwise(store, a, b, repetition, winner, prompt="current", case="dev-case"):
+def _pairwise(
+    store, a, b, repetition, winner, prompt="current", case="dev-case"
+):
     payload = {
         "operation": "pairwise",
         "status": "complete",
@@ -206,7 +225,7 @@ def _pairwise(store, a, b, repetition, winner, prompt="current", case="dev-case"
     )
 
 
-def test_aggregates_scores_failures_latency_tokens_pairwise_and_recommendations(
+def test_aggregates_scores_failures_latency_tokens_pairwise_and_recommendations(  # noqa: E501
     tmp_path,
 ):
     store = _store(tmp_path)
@@ -253,7 +272,11 @@ def test_aggregates_scores_failures_latency_tokens_pairwise_and_recommendations(
     assert row.completed_runs == 3 and row.failed_runs == 1
     assert row.mean_latency_seconds == 2.0
     assert row.mean_input_tokens == 20.0 and row.mean_output_tokens == 40.0
-    assert (row.pairwise_wins, row.pairwise_losses, row.pairwise_ties) == (1, 1, 1)
+    assert (row.pairwise_wins, row.pairwise_losses, row.pairwise_ties) == (
+        1,
+        1,
+        1,
+    )
     assert row.baseline_delta == 0.0
     assert report.to_dict()["leaderboard"][0]["model_id"] == "local-b"
     assert report.failure_tags["local-a"]["current"]["missed_action"] == 2
@@ -265,9 +288,15 @@ def test_split_coverage_warning_and_atomic_report_files(tmp_path):
     cache = _generation(store, "local-a", 1)
     _judgment(store, "local-a", 1, cache, score=5)
     report = build_report(store)
-    assert {row.split for row in report.rows} == {"development", "validation", "test"}
+    assert {row.split for row in report.rows} == {
+        "development",
+        "validation",
+        "test",
+    }
     assert all(
-        row.completed_runs == 0 for row in report.rows if row.split != "development"
+        row.completed_runs == 0
+        for row in report.rows
+        if row.split != "development"
     )
     paths = write_report(store, report)
     assert tuple(path.name for path in paths) == (
@@ -278,10 +307,20 @@ def test_split_coverage_warning_and_atomic_report_files(tmp_path):
     data = json.loads(paths[0].read_text(encoding="utf-8"))
     assert "raw_artifacts" in data
     assert paths[1].read_text(encoding="utf-8").splitlines()[0] == (
-        "split,prompt_id,model_id,kind,completed_runs,failed_runs,mean_score,score_stddev,critical_errors,mean_factual_accuracy,mean_decisions_and_actions,mean_technical_detail_and_blockers,mean_structure_and_compliance,mean_concision_and_usefulness,mean_latency_seconds,mean_input_tokens,mean_output_tokens,pairwise_wins,pairwise_losses,pairwise_ties,baseline_delta"
+        (
+            "split,prompt_id,model_id,kind,completed_runs,failed_runs,"
+            "mean_score,score_stddev,critical_errors,mean_factual_accuracy,"
+            "mean_decisions_and_actions,mean_technical_detail_and_blockers,"
+            "mean_structure_and_compliance,mean_concision_and_usefulness,"
+            "mean_latency_seconds,mean_input_tokens,mean_output_tokens,"
+            "pairwise_wins,pairwise_losses,pairwise_ties,baseline_delta"
+        )
     )
     markdown = paths[2].read_text(encoding="utf-8")
-    warning = "Prompt recommendations are development-only. Add at least one validation case and one held-out test case before promoting a prompt."
+    warning = (
+        "Prompt recommendations are development-only. Add at least one "
+        "validation case and one held-out test case before promoting a prompt."
+    )
     assert warning in markdown
     validation_cache = _generation(
         store, "local-a", 1, split="validation", case="validation-case"
@@ -295,7 +334,9 @@ def test_split_coverage_warning_and_atomic_report_files(tmp_path):
         case="validation-case",
         score=5,
     )
-    test_cache = _generation(store, "local-a", 1, split="test", case="test-case")
+    test_cache = _generation(
+        store, "local-a", 1, split="test", case="test-case"
+    )
     _judgment(
         store,
         "local-a",
@@ -322,7 +363,10 @@ def test_partial_split_coverage_stays_development_only(
     tmp_path, partial_split, partial_case, remaining_split, remaining_case
 ):
     store = _store(tmp_path)
-    warning = "Prompt recommendations are development-only. Add at least one validation case and one held-out test case before promoting a prompt."
+    warning = (
+        "Prompt recommendations are development-only. Add at least one "
+        "validation case and one held-out test case before promoting a prompt."
+    )
 
     partial_cache = _generation(
         store, "local-a", 1, split=partial_split, case=partial_case

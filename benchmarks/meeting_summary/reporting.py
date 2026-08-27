@@ -82,9 +82,17 @@ class BenchmarkReport:
     @property
     def split_warning(self) -> str:
         if self.split_coverage.get("development_only"):
-            return "Prompt recommendations are development-only. Add at least one validation case and one held-out test case before promoting a prompt."
+            return (
+                "Prompt recommendations are development-only. Add "
+                "at least one validation case and one held-out test "
+                "case before promoting a prompt."
+            )
         missing = self.split_coverage.get("missing_splits", [])
-        return "Missing completed splits: %s." % ", ".join(missing) if missing else ""
+        return (
+            "Missing completed splits: %s." % ", ".join(missing)
+            if missing
+            else ""
+        )
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -103,7 +111,8 @@ class BenchmarkReport:
             "pairwise_results": list(self.pairwise_results),
             "split_coverage": dict(self.split_coverage),
             "raw_artifacts": {
-                kind: list(artifacts) for kind, artifacts in self.raw_artifacts.items()
+                kind: list(artifacts)
+                for kind, artifacts in self.raw_artifacts.items()
             },
         }
 
@@ -227,7 +236,9 @@ def build_report(store: RunStore) -> BenchmarkReport:
         )
     )
     keys = _row_keys(config, generations, valid_jobs, store.manifest)
-    rows = _make_rows(keys, valid_jobs, failures, pairwise, config, store.manifest)
+    rows = _make_rows(
+        keys, valid_jobs, failures, pairwise, config, store.manifest
+    )
     tag_counts = _failure_tag_counts(valid_jobs)
     recommendations = _recommendations(valid_jobs)
     split_coverage = _split_coverage(config, rows, store.manifest)
@@ -243,11 +254,18 @@ def build_report(store: RunStore) -> BenchmarkReport:
     return replace(report, markdown=_render_markdown(report))
 
 
-def write_report(store: RunStore, report: BenchmarkReport) -> Tuple[Path, Path, Path]:
-    """Write report.json, report.csv, and report.md through RunStore's atomic writer."""
+def write_report(
+    store: RunStore, report: BenchmarkReport
+) -> Tuple[Path, Path, Path]:
+    (
+        """Write report.json, report.csv, and report.md through RunStore's """
+        """atomic writer."""
+    )
     json_path = store.write_text(
         Path("report.json"),
-        json.dumps(report.to_dict(), ensure_ascii=False, indent=2, sort_keys=True)
+        json.dumps(
+            report.to_dict(), ensure_ascii=False, indent=2, sort_keys=True
+        )
         + "\n",
     )
     csv_path = store.write_text(Path("report.csv"), _render_csv(report.rows))
@@ -303,7 +321,9 @@ def _minimal_config(path):
         ):
             name, value = stripped.split(":", 1)
             current[name.strip()] = value.strip().strip("\\\"'")
-    prompts = tuple(SimpleNamespace(id=item["id"]) for item in sections["prompts"])
+    prompts = tuple(
+        SimpleNamespace(id=item["id"]) for item in sections["prompts"]
+    )
     cases = tuple(
         SimpleNamespace(id=item["id"], split=item.get("split", "development"))
         for item in sections["cases"]
@@ -320,7 +340,9 @@ def _minimal_config(path):
     )
 
 
-def _read_artifacts(store: RunStore) -> Dict[str, Tuple[Mapping[str, Any], ...]]:
+def _read_artifacts(
+    store: RunStore,
+) -> Dict[str, Tuple[Mapping[str, Any], ...]]:
     result: Dict[str, Tuple[Mapping[str, Any], ...]] = {}
     for kind, directory in (
         ("generation", "generations"),
@@ -379,11 +401,23 @@ def _configured_jobs(config, generations, manifest=None):
         models = [item["id"] for item in snapshot.get("models", [])]
         prompts = [item["id"] for item in snapshot.get("prompts", [])]
         cases = [item["id"] for item in snapshot.get("cases", [])]
-        scope = manifest.get("scope", {}) if isinstance(manifest, Mapping) else {}
+        scope = (
+            manifest.get("scope", {}) if isinstance(manifest, Mapping) else {}
+        )
         if isinstance(scope, Mapping):
-            models = [item for item in models if item in scope.get("model_ids", models)]
-            prompts = [item for item in prompts if item in scope.get("prompt_ids", prompts)]
-            cases = [item for item in cases if item in scope.get("case_ids", cases)]
+            models = [
+                item
+                for item in models
+                if item in scope.get("model_ids", models)
+            ]
+            prompts = [
+                item
+                for item in prompts
+                if item in scope.get("prompt_ids", prompts)
+            ]
+            cases = [
+                item for item in cases if item in scope.get("case_ids", cases)
+            ]
             splits = set(scope.get("splits", []))
         else:
             splits = set()
@@ -391,7 +425,11 @@ def _configured_jobs(config, generations, manifest=None):
             item["id"]: item.get("split", "")
             for item in snapshot.get("cases", [])
         }
-        cases = [item for item in cases if not splits or case_splits.get(item) in splits]
+        cases = [
+            item
+            for item in cases
+            if not splits or case_splits.get(item) in splits
+        ]
         repetitions = int(snapshot.get("generation", {}).get("repetitions", 1))
         return {
             (model, prompt, case, repetition)
@@ -417,16 +455,35 @@ def _row_keys(config, generations, valid_jobs, manifest=None):
         keys.add((key[1], str(values[0].get("split", "")), key[0]))
     snapshot = _snapshot(manifest)
     if snapshot is not None:
-        scope = manifest.get("scope", {}) if isinstance(manifest, Mapping) else {}
+        scope = (
+            manifest.get("scope", {}) if isinstance(manifest, Mapping) else {}
+        )
         model_ids = [item["id"] for item in snapshot.get("models", [])]
         prompt_ids = [item["id"] for item in snapshot.get("prompts", [])]
         cases = snapshot.get("cases", [])
         if isinstance(scope, Mapping):
-            model_ids = [item for item in model_ids if item in scope.get("model_ids", model_ids)]
-            prompt_ids = [item for item in prompt_ids if item in scope.get("prompt_ids", prompt_ids)]
-            cases = [item for item in cases if item.get("id") in scope.get("case_ids", [item.get("id") for item in cases])]
+            model_ids = [
+                item
+                for item in model_ids
+                if item in scope.get("model_ids", model_ids)
+            ]
+            prompt_ids = [
+                item
+                for item in prompt_ids
+                if item in scope.get("prompt_ids", prompt_ids)
+            ]
+            cases = [
+                item
+                for item in cases
+                if item.get("id")
+                in scope.get("case_ids", [item.get("id") for item in cases])
+            ]
             splits = set(scope.get("splits", []))
-            cases = [item for item in cases if not splits or item.get("split") in splits]
+            cases = [
+                item
+                for item in cases
+                if not splits or item.get("split") in splits
+            ]
         keys.update(
             (prompt, case.get("split", ""), model)
             for model in model_ids
@@ -451,9 +508,16 @@ def _row_keys(config, generations, valid_jobs, manifest=None):
 def _make_rows(keys, valid_jobs, failures, pairwise, config, manifest=None):
     snapshot = _snapshot(manifest)
     kinds = (
-        {item["id"]: item.get("kind", "candidate") for item in snapshot.get("models", [])}
+        {
+            item["id"]: item.get("kind", "candidate")
+            for item in snapshot.get("models", [])
+        }
         if snapshot is not None
-        else ({model.id: model.kind for model in config.models} if config is not None else {})
+        else (
+            {model.id: model.kind for model in config.models}
+            if config is not None
+            else {}
+        )
     )
     baseline_scores: Dict[Tuple[str, str], float] = {}
     grouped: Dict[
@@ -474,11 +538,14 @@ def _make_rows(keys, valid_jobs, failures, pairwise, config, manifest=None):
         values = grouped.get((prompt_id, split, model_id), [])
         scores = [_score(judgment) for _, judgment in values]
         means = {
-            field: _mean([_dimension(judgment, field) for _, judgment in values])
+            field: _mean(
+                [_dimension(judgment, field) for _, judgment in values]
+            )
             for field in SCORE_FIELDS
         }
         run_errors = tuple(
-            len(_result(judgment).get("critical_errors", [])) for _, judgment in values
+            len(_result(judgment).get("critical_errors", []))
+            for _, judgment in values
         )
         gen_by_key = {
             (
@@ -512,14 +579,18 @@ def _make_rows(keys, valid_jobs, failures, pairwise, config, manifest=None):
             critical_errors=sum(run_errors),
             mean_factual_accuracy=means["factual_accuracy"],
             mean_decisions_and_actions=means["decisions_and_actions"],
-            mean_technical_detail_and_blockers=means["technical_detail_and_blockers"],
+            mean_technical_detail_and_blockers=means[
+                "technical_detail_and_blockers"
+            ],
             mean_structure_and_compliance=means["structure_and_compliance"],
             mean_concision_and_usefulness=means["concision_and_usefulness"],
             mean_latency_seconds=_mean(
                 [float(g.get("elapsed_seconds", 0.0)) for g, _ in values]
             ),
             mean_input_tokens=_mean([_tokens(g, "input") for g, _ in values]),
-            mean_output_tokens=_mean([_tokens(g, "output") for g, _ in values]),
+            mean_output_tokens=_mean(
+                [_tokens(g, "output") for g, _ in values]
+            ),
             pairwise_wins=wins,
             pairwise_losses=losses,
             pairwise_ties=ties,
@@ -543,7 +614,10 @@ def _make_rows(keys, valid_jobs, failures, pairwise, config, manifest=None):
 def row_key_is_baseline(model_id, kinds, values):
     return (
         kinds.get(model_id) == "baseline"
-        or (not kinds and any(str(g.get("kind")) == "baseline" for g, _ in values))
+        or (
+            not kinds
+            and any(str(g.get("kind")) == "baseline" for g, _ in values)
+        )
         or model_id == "luna-control"
     )
 
@@ -556,7 +630,8 @@ def _pairwise_counts(model_id, prompt_id, split, jobs, pairwise):
         case = str(item.get("case_id", ""))
         rep = int(item.get("repetition", 0))
         if not any(
-            str(g.get("case_id")) == case and int(g.get("repetition", 0)) == rep
+            str(g.get("case_id")) == case
+            and int(g.get("repetition", 0)) == rep
             for g in jobs.values()
         ):
             continue
@@ -594,15 +669,21 @@ def _scoped_pairwise(artifacts, generations, manifest):
             or str(item.get("case_id", "")) not in case_ids
         ):
             continue
-        if not {str(item.get("model_a_id", "")), str(item.get("model_b_id", ""))}.issubset(model_ids):
+        if not {
+            str(item.get("model_a_id", "")),
+            str(item.get("model_b_id", "")),
+        }.issubset(model_ids):
             continue
         split = next(
             (
                 str(generation.get("split", ""))
                 for generation in generations.values()
-                if str(generation.get("case_id", "")) == str(item.get("case_id", ""))
-                and str(generation.get("prompt_id", "")) == str(item.get("prompt_id", ""))
-                and int(generation.get("repetition", 0)) == int(item.get("repetition", 0))
+                if str(generation.get("case_id", ""))
+                == str(item.get("case_id", ""))
+                and str(generation.get("prompt_id", ""))
+                == str(item.get("prompt_id", ""))
+                and int(generation.get("repetition", 0))
+                == int(item.get("repetition", 0))
             ),
             "",
         )
@@ -616,14 +697,17 @@ def _complete_pairwise(artifacts):
     return tuple(
         item
         for item in artifacts
-        if item.get("status") == "complete" and isinstance(item.get("result"), Mapping)
+        if item.get("status") == "complete"
+        and isinstance(item.get("result"), Mapping)
     )
 
 
 def _pairwise_failures(artifacts, generations):
     failures = []
     for item in artifacts:
-        if item.get("status") == "complete" and isinstance(item.get("result"), Mapping):
+        if item.get("status") == "complete" and isinstance(
+            item.get("result"), Mapping
+        ):
             continue
         case_id = str(item.get("case_id", ""))
         prompt_id = str(item.get("prompt_id", ""))
@@ -648,7 +732,9 @@ def _pairwise_failures(artifacts, generations):
                 "repetition": repetition,
                 "stage": "pairwise",
                 "status": str(item.get("status", "failed")),
-                "message": str(item.get("error") or "pairwise result unavailable"),
+                "message": str(
+                    item.get("error") or "pairwise result unavailable"
+                ),
             }
         )
     return failures
@@ -678,7 +764,10 @@ def _leaderboard(rows):
 
 def _failure_tag_counts(valid_jobs):
     result: Dict[str, Dict[str, Dict[str, int]]] = {}
-    for (model, prompt, _case, _rep), (generation, judgment) in valid_jobs.items():
+    for (model, prompt, _case, _rep), (
+        generation,
+        judgment,
+    ) in valid_jobs.items():
         if str(generation.get("split", "")) == "test":
             continue
         tags = _result(judgment).get("failure_tags", [])
@@ -717,9 +806,19 @@ def _split_coverage(config, rows, manifest=None):
     snapshot = _snapshot(manifest)
     if snapshot is not None:
         cases = snapshot.get("cases", [])
-        scope = manifest.get("scope", {}) if isinstance(manifest, Mapping) else {}
-        case_ids = set(scope.get("case_ids", [])) if isinstance(scope, Mapping) else set()
-        splits = set(scope.get("splits", [])) if isinstance(scope, Mapping) else set()
+        scope = (
+            manifest.get("scope", {}) if isinstance(manifest, Mapping) else {}
+        )
+        case_ids = (
+            set(scope.get("case_ids", []))
+            if isinstance(scope, Mapping)
+            else set()
+        )
+        splits = (
+            set(scope.get("splits", []))
+            if isinstance(scope, Mapping)
+            else set()
+        )
         configured = {
             str(item.get("split", ""))
             for item in cases
@@ -735,9 +834,9 @@ def _split_coverage(config, rows, manifest=None):
     completed = {row.split for row in rows if row.completed_runs}
     required_splits = {"validation", "test"}.intersection(configured)
     missing = sorted(required_splits - completed)
-    development_only = configured == {"development"} or not required_splits.issubset(
-        completed
-    )
+    development_only = configured == {
+        "development"
+    } or not required_splits.issubset(completed)
     return {
         "configured_splits": sorted(configured),
         "completed_splits": sorted(completed),
@@ -748,24 +847,36 @@ def _split_coverage(config, rows, manifest=None):
 
 def _render_csv(rows):
     output = StringIO()
-    writer = csv.DictWriter(output, fieldnames=CSV_COLUMNS, lineterminator="\n")
+    writer = csv.DictWriter(
+        output, fieldnames=CSV_COLUMNS, lineterminator="\n"
+    )
     writer.writeheader()
     for row in rows:
-        writer.writerow({name: _csv_value(getattr(row, name)) for name in CSV_COLUMNS})
+        writer.writerow(
+            {name: _csv_value(getattr(row, name)) for name in CSV_COLUMNS}
+        )
     return output.getvalue()
 
 
 def _render_markdown(report):
-    lines = ["# Meeting Summary Benchmark Report", "", "## Local model leaderboard", ""]
+    lines = [
+        "# Meeting Summary Benchmark Report",
+        "",
+        "## Local model leaderboard",
+        "",
+    ]
     local = [
-        row for row in report.rows if row.kind == "candidate" and row.completed_runs
+        row
+        for row in report.rows
+        if row.kind == "candidate" and row.completed_runs
     ]
     lines.append(
         "| Split | Prompt | Model | Mean score | Stddev | Completed | Failed |"
     )
     lines.append("| --- | --- | --- | ---: | ---: | ---: | ---: |")
     for row in sorted(
-        local, key=lambda item: (-(item.mean_score or 0), item.model_id, item.split)
+        local,
+        key=lambda item: (-(item.mean_score or 0), item.model_id, item.split),
     ):
         lines.append(
             "| %s | %s | %s | %s | %s | %d | %d |"
@@ -786,7 +897,12 @@ def _render_markdown(report):
         if row.kind == "candidate":
             lines.append(
                 "- `%s` (%s/%s): baseline delta %s."
-                % (row.model_id, row.prompt_id, row.split, _display(row.baseline_delta))
+                % (
+                    row.model_id,
+                    row.prompt_id,
+                    row.split,
+                    _display(row.baseline_delta),
+                )
             )
     lines += ["", "## Critical factual failures by model", ""]
     for row in report.rows:
@@ -800,7 +916,12 @@ def _render_markdown(report):
         if row.completed_runs:
             lines.append(
                 "- `%s` (%s/%s): score standard deviation %s."
-                % (row.model_id, row.prompt_id, row.split, _display(row.score_stddev))
+                % (
+                    row.model_id,
+                    row.prompt_id,
+                    row.split,
+                    _display(row.score_stddev),
+                )
             )
     lines += ["", "## Runtime/token trade-offs", ""]
     for row in report.rows:
@@ -839,7 +960,8 @@ def _render_markdown(report):
                     model,
                     prompt,
                     ", ".join(
-                        "%s (%d)" % (tag, count) for tag, count in sorted(tags.items())
+                        "%s (%d)" % (tag, count)
+                        for tag, count in sorted(tags.items())
                     ),
                 )
             )
@@ -851,12 +973,17 @@ def _render_markdown(report):
     if report.split_coverage.get("development_only"):
         lines += [
             "",
-            "Prompt recommendations are development-only. Add at least one validation case and one held-out test case before promoting a prompt.",
+            (
+                "Prompt recommendations are development-only. Add "
+                "at least one validation case and one held-out test "
+                "case before promoting a prompt."
+            ),
         ]
     lines += ["", "## Split coverage warning", ""]
     missing = report.split_coverage.get("missing_splits", [])
     lines.append(
-        "Missing completed splits: %s." % (", ".join(missing) if missing else "none")
+        "Missing completed splits: %s."
+        % (", ".join(missing) if missing else "none")
     )
     lines += ["", "## Failed or missing jobs", ""]
     if report.failures:
@@ -881,7 +1008,9 @@ def _failure(key, stage, status, message, config=None, generation=None):
     model, prompt, case, repetition = key
     split = str(generation.get("split", "")) if generation is not None else ""
     if not split and config is not None:
-        split = next((item.split for item in config.cases if item.id == case), "")
+        split = next(
+            (item.split for item in config.cases if item.id == case), ""
+        )
     return {
         "model_id": model,
         "prompt_id": prompt,
@@ -940,7 +1069,9 @@ def _tokens(generation, direction):
         if isinstance(source, Mapping):
             for name in names:
                 value = source.get(name)
-                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                if isinstance(value, (int, float)) and not isinstance(
+                    value, bool
+                ):
                     return float(value)
     return 0.0
 
@@ -955,7 +1086,9 @@ def _row_tags(values):
 
 
 def _kind_from_values(values):
-    return str(values[0][0].get("kind", "candidate")) if values else "candidate"
+    return (
+        str(values[0][0].get("kind", "candidate")) if values else "candidate"
+    )
 
 
 def _csv_value(value):

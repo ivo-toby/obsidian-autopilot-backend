@@ -310,9 +310,11 @@ def _artifact_matches_job(
         return False
     summary_path = store.run_dir / artifact.summary_path
     try:
-        return summary_path.is_file() and sha256_text(
-            summary_path.read_text(encoding="utf-8")
-        ) == artifact.summary_sha256
+        return (
+            summary_path.is_file()
+            and sha256_text(summary_path.read_text(encoding="utf-8"))
+            == artifact.summary_sha256
+        )
     except (OSError, UnicodeError):
         return False
 

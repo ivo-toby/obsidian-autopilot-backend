@@ -4,7 +4,10 @@ from pathlib import Path
 import pytest
 
 import benchmarks.meeting_summary.judging as judging_module
-from benchmarks.meeting_summary.generation import GenerationFilters, generate_candidates
+from benchmarks.meeting_summary.generation import (
+    GenerationFilters,
+    generate_candidates,
+)
 from benchmarks.meeting_summary.judging import (
     VALID_SCORE_FIELDS,
     VALID_FAILURE_TAGS,
@@ -177,7 +180,9 @@ def test_invalid_json_gets_one_retry_and_failure_is_cached(tmp_path: Path):
     assert len(client.requests) == 2
     files = list((store.run_dir / "judgments").rglob("*.json"))
     assert len(files) == 1
-    failure = store.read_json([f for f in files if "repetition-1" in str(f)][0])
+    failure = store.read_json(
+        [f for f in files if "repetition-1" in str(f)][0]
+    )
     assert failure["status"] == "failed"
     assert len(failure["raw_attempts"]) == 2
     assert artifacts
@@ -193,7 +198,9 @@ def test_pairwise_placement_is_stable_and_balanced():
         for repetition in range(40)
     ]
     assert set(placements) == {("a", "b"), ("b", "a")}
-    counts = {placement: placements.count(placement) for placement in set(placements)}
+    counts = {
+        placement: placements.count(placement) for placement in set(placements)
+    }
     assert abs(counts[("a", "b")] - counts[("b", "a")]) <= 1
 
 
@@ -225,9 +232,13 @@ def test_judgment_cache_invalidates_when_judge_settings_change(tmp_path: Path):
 def _pairwise_fixture(tmp_path):
     config = make_config(tmp_path, model_count=2)
     store = RunStore.create(config.output_dir, config.source)
-    generation = generate_candidates(config, store, None, StubClient(["summary"] * 6))
+    generation = generate_candidates(
+        config, store, None, StubClient(["summary"] * 6)
+    )
     judge_generations(
-        config, store, StubClient([json.dumps(VALID_JUDGMENT)] * len(generation))
+        config,
+        store,
+        StubClient([json.dumps(VALID_JUDGMENT)] * len(generation)),
     )
     response = json.dumps(
         {
@@ -242,7 +253,9 @@ def _pairwise_fixture(tmp_path):
 
 def test_pairwise_cache_invalidates_on_judge_settings_change(tmp_path: Path):
     config, store, pairwise_response = _pairwise_fixture(tmp_path)
-    judge_pairwise_top_models(config, store, StubClient([pairwise_response] * 4))
+    judge_pairwise_top_models(
+        config, store, StubClient([pairwise_response] * 4)
+    )
     changed = BenchmarkConfig(
         source=config.source,
         output_dir=config.output_dir,
@@ -261,8 +274,12 @@ def test_pairwise_cache_invalidates_on_prompt_version_only(
     tmp_path: Path, monkeypatch
 ):
     config, store, pairwise_response = _pairwise_fixture(tmp_path)
-    judge_pairwise_top_models(config, store, StubClient([pairwise_response] * 4))
-    monkeypatch.setattr(judging_module, "PAIRWISE_PROMPT_VERSION", "pairwise-v2")
+    judge_pairwise_top_models(
+        config, store, StubClient([pairwise_response] * 4)
+    )
+    monkeypatch.setattr(
+        judging_module, "PAIRWISE_PROMPT_VERSION", "pairwise-v2"
+    )
     client = StubClient([pairwise_response] * 4)
     judge_pairwise_top_models(config, store, client)
     assert len(client.requests) == 4
@@ -285,7 +302,9 @@ def test_pairwise_cache_invalidates_on_prompt_version_only(
 def test_pairwise_judge_has_no_identity_and_normalizes_winner(tmp_path: Path):
     config = make_config(tmp_path, model_count=2)
     store = RunStore.create(config.output_dir, config.source)
-    generation = generate_candidates(config, store, None, StubClient(["summary"] * 6))
+    generation = generate_candidates(
+        config, store, None, StubClient(["summary"] * 6)
+    )
     absolute = StubClient([json.dumps(VALID_JUDGMENT)] * len(generation))
     judge_generations(config, store, absolute)
     pairwise = StubClient(

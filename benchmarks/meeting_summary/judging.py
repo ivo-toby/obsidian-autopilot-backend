@@ -99,7 +99,9 @@ _JUDGE_KEYS = frozenset(
         "verdict",
     }
 )
-_PAIRWISE_KEYS = frozenset({"winner", "reason", "critical_difference", "confidence"})
+_PAIRWISE_KEYS = frozenset(
+    {"winner", "reason", "critical_difference", "confidence"}
+)
 
 
 def parse_judge_result(raw: str) -> JudgeResult:
@@ -120,7 +122,9 @@ def parse_judge_result(raw: str) -> JudgeResult:
         if isinstance(score, bool) or not isinstance(score, int):
             raise JudgmentParseError("score %s must be an integer" % name)
         if score < 1 or score > 5:
-            raise JudgmentParseError("score %s must be from 1 through 5" % name)
+            raise JudgmentParseError(
+                "score %s must be from 1 through 5" % name
+            )
         parsed_scores[name] = score
 
     errors_value = value["critical_errors"]
@@ -131,7 +135,9 @@ def parse_judge_result(raw: str) -> JudgeResult:
     failure_tags = _string_array(value["failure_tags"], "failure_tags")
     unknown_tags = set(failure_tags) - VALID_FAILURE_TAGS
     if unknown_tags:
-        raise JudgmentParseError("unknown failure tag(s): %s" % sorted(unknown_tags))
+        raise JudgmentParseError(
+            "unknown failure tag(s): %s" % sorted(unknown_tags)
+        )
     recommendations = _string_array(
         value["prompt_recommendations"], "prompt_recommendations"
     )
@@ -161,7 +167,10 @@ def parse_pairwise_result(raw: str) -> Tuple[str, str, str, int]:
         raise JudgmentParseError("winner must be A, B, or tie")
     if not isinstance(reason, str) or not reason.strip():
         raise JudgmentParseError("reason must not be empty")
-    if not isinstance(critical_difference, str) or not critical_difference.strip():
+    if (
+        not isinstance(critical_difference, str)
+        or not critical_difference.strip()
+    ):
         raise JudgmentParseError("critical_difference must not be empty")
     if isinstance(confidence, bool) or not isinstance(confidence, int):
         raise JudgmentParseError("confidence must be an integer")
@@ -194,7 +203,9 @@ def _reject_unknown_keys(
 ) -> None:
     unknown = set(value) - set(allowed)
     if unknown:
-        raise JudgmentParseError("unknown %s field(s): %s" % (name, sorted(unknown)))
+        raise JudgmentParseError(
+            "unknown %s field(s): %s" % (name, sorted(unknown))
+        )
 
 
 def _parse_critical_error(value: object) -> CriticalError:
@@ -204,14 +215,18 @@ def _parse_critical_error(value: object) -> CriticalError:
     _reject_unknown_keys(value, keys, "critical error")
     if set(value) != keys:
         raise JudgmentParseError("critical error has missing fields")
-    fields = [value[name] for name in ("claim", "transcript_evidence", "explanation")]
+    fields = [
+        value[name] for name in ("claim", "transcript_evidence", "explanation")
+    ]
     if any(not isinstance(item, str) or not item.strip() for item in fields):
         raise JudgmentParseError("critical error fields must not be empty")
     return CriticalError(fields[0], fields[1], fields[2])
 
 
 def _string_array(value: object, name: str) -> Tuple[str, ...]:
-    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+    if not isinstance(value, list) or any(
+        not isinstance(item, str) for item in value
+    ):
         raise JudgmentParseError("%s must be an array of strings" % name)
     return tuple(value)
 
@@ -381,8 +396,8 @@ def _retry_prompt(prompt: str, invalid_response: str) -> str:
         'Return exactly one JSON object with keys "scores", '
         '"critical_errors", "missed_items", "failure_tags", '
         '"prompt_recommendations", and "verdict". Every score is an integer '
-        "from 1 through 5; critical errors contain claim, transcript_evidence, "
-        "and explanation. Do not include any other keys."
+        "from 1 through 5; critical errors contain claim, "
+        "transcript_evidence, and explanation. Do not include any other keys."
     )
     return (
         "CORRECTION: Your previous response was invalid. "
@@ -401,14 +416,19 @@ def judge_pairwise_top_models(
     fail_fast: bool = False,
     filters: Optional[object] = None,
 ) -> Tuple[PairwiseResult, ...]:
-    """Compare the selected local models and the leading configured baseline."""
+    (
+        """Compare the selected local models and the leading configured """
+        """baseline."""
+    )
     scores = _completed_judgments(store, filters)
     generation = _generation_artifacts(store, filters)
     by_model: Dict[str, List[float]] = {}
     kinds = {model.id: model.kind for model in config.models}
     for artifact, result in scores:
         if kinds.get(artifact.model_id) == "candidate":
-            by_model.setdefault(artifact.model_id, []).append(result.weighted_total)
+            by_model.setdefault(artifact.model_id, []).append(
+                result.weighted_total
+            )
     ranked = sorted(
         by_model,
         key=lambda model_id: (
@@ -459,7 +479,8 @@ def judge_pairwise_top_models(
                 )
                 if sha256_text(transcript_b) != sha256_text(transcript):
                     raise ValueError(
-                        "pairwise item B transcript identity differs from item A"
+                        "pairwise item B transcript identity differs from "
+                        "item A"
                     )
                 text_a = _read_verified_summary(store, item_a)
                 text_b = _read_verified_summary(store, item_b)
@@ -472,7 +493,11 @@ def judge_pairwise_top_models(
                     raise
                 continue
             first, second = choose_pairwise_order(
-                model_a, model_b, item_a.case_id, item_a.prompt_id, item_a.repetition
+                model_a,
+                model_b,
+                item_a.case_id,
+                item_a.prompt_id,
+                item_a.repetition,
             )
             summary_a = text_a if first == model_a else text_b
             summary_b = text_b if first == model_a else text_a
@@ -521,7 +546,9 @@ def judge_pairwise_top_models(
             if result is not None:
                 results.append(_pairwise_from_payload(store.read_json(path)))
             elif fail_fast:
-                raise RuntimeError(str(payload.get("error") or "pairwise judgment failed"))
+                raise RuntimeError(
+                    str(payload.get("error") or "pairwise judgment failed")
+                )
     return tuple(results)
 
 
@@ -531,14 +558,16 @@ def choose_pairwise_order(
     ordered = sorted((model_a, model_b))
     canonical = (ordered[0], ordered[1])
     digest = sha256(
-        ("%s|%s|%s|%s" % (canonical[0], canonical[1], case_id, prompt_id)).encode(
-            "utf-8"
-        )
+        (
+            "%s|%s|%s|%s" % (canonical[0], canonical[1], case_id, prompt_id)
+        ).encode("utf-8")
     ).digest()
     # The hash makes placement reproducible; repetition parity balances A/B
     # placement for repeated comparisons of the same pair.
     canonical_order = (
-        canonical if (digest[0] ^ repetition) % 2 == 0 else (canonical[1], canonical[0])
+        canonical
+        if (digest[0] ^ repetition) % 2 == 0
+        else (canonical[1], canonical[0])
     )
     if (model_a, model_b) == canonical:
         return canonical_order
@@ -546,7 +575,15 @@ def choose_pairwise_order(
 
 
 def _run_pairwise(
-    config, client, item_a, item_b, first, second, prompt, cache_key, golden_sha256
+    config,
+    client,
+    item_a,
+    item_b,
+    first,
+    second,
+    prompt,
+    cache_key,
+    golden_sha256,
 ):
     started = time.monotonic()
     attempts: List[str] = []
@@ -578,7 +615,9 @@ def _run_pairwise(
                 response.text
             )
             normalized = (
-                None if winner == "tie" else (first if winner == "A" else second)
+                None
+                if winner == "tie"
+                else (first if winner == "A" else second)
             )
             result = PairwiseResult(
                 winner,
@@ -632,7 +671,11 @@ def _run_pairwise(
 
 def _retry_prompt_pairwise(prompt: str, invalid_response: str) -> str:
     return (
-        "CORRECTION: Return one JSON object with winner (A, B, or tie), reason, critical_difference, and integer confidence 1 through 5. Previous invalid response:\n"
+        (
+            "CORRECTION: Return one JSON object with winner (A, B, or tie), "
+            "reason, critical_difference, and integer confidence 1 through 5. "
+            "Previous invalid response:\n"
+        )
         + invalid_response
         + "\n\n"
         + prompt
@@ -640,7 +683,9 @@ def _retry_prompt_pairwise(prompt: str, invalid_response: str) -> str:
 
 
 def _prompt_template(name: str) -> str:
-    return (Path(__file__).parent / "prompts" / name).read_text(encoding="utf-8")
+    return (Path(__file__).parent / "prompts" / name).read_text(
+        encoding="utf-8"
+    )
 
 
 def _generation_artifacts(
@@ -650,15 +695,21 @@ def _generation_artifacts(
     root = store.run_dir / "generations"
     for path in sorted(root.rglob("*.json")) if root.is_dir() else ():
         try:
-            artifact = GenerationArtifact.from_payload(store.read_json(path), path)
+            artifact = GenerationArtifact.from_payload(
+                store.read_json(path), path
+            )
         except (KeyError, TypeError, ValueError):
             continue
-        if artifact.status == "complete" and _artifact_selected(artifact, filters):
+        if artifact.status == "complete" and _artifact_selected(
+            artifact, filters
+        ):
             values.append(artifact)
     return tuple(values)
 
 
-def _artifact_selected(artifact: GenerationArtifact, filters: Optional[object]) -> bool:
+def _artifact_selected(
+    artifact: GenerationArtifact, filters: Optional[object]
+) -> bool:
     if filters is None:
         return True
     values = (
@@ -667,12 +718,12 @@ def _artifact_selected(artifact: GenerationArtifact, filters: Optional[object]) 
         (getattr(filters, "case_ids", None), artifact.case_id),
         (getattr(filters, "splits", None), artifact.split),
     )
-    return all(selected is None or value in selected for selected, value in values)
+    return all(
+        selected is None or value in selected for selected, value in values
+    )
 
 
-def _completed_judgments(
-    store: RunStore, filters: Optional[object] = None
-):
+def _completed_judgments(store: RunStore, filters: Optional[object] = None):
     values = []
     root = store.run_dir / "judgments"
     for path in sorted(root.rglob("*.json")) if root.is_dir() else ():
@@ -689,7 +740,13 @@ def _completed_judgments(
                 if item.cache_key == payload["generation_cache_key"]
             )
             values.append((artifact, _result_from_payload(payload)))
-        except (KeyError, StopIteration, JudgmentParseError, TypeError, ValueError):
+        except (
+            KeyError,
+            StopIteration,
+            JudgmentParseError,
+            TypeError,
+            ValueError,
+        ):
             continue
     return values
 
@@ -705,7 +762,9 @@ def _load_judge_inputs(store, artifact, case):
         )
     golden_hashes = store.manifest.get("golden_sha256", {})
     golden_hash = (
-        golden_hashes.get(case.id) if isinstance(golden_hashes, Mapping) else None
+        golden_hashes.get(case.id)
+        if isinstance(golden_hashes, Mapping)
+        else None
     )
     if not golden_hash:
         raise ValueError("golden snapshot is missing; require a new run")
@@ -733,7 +792,9 @@ def _load_input_snapshot(store, category, identifier, digest):
 
 def _read_verified_summary(store, artifact):
     if not artifact.summary_sha256:
-        raise ValueError("generation summary hash is missing; require regeneration")
+        raise ValueError(
+            "generation summary hash is missing; require regeneration"
+        )
     path = store.run_dir / artifact.summary_path
     content = path.read_text(encoding="utf-8")
     if sha256_text(content) != artifact.summary_sha256:
@@ -861,7 +922,9 @@ def _judgment_payload(
 
 def _result_payload(result: JudgeResult):
     return {
-        "scores": {name: getattr(result.scores, name) for name in VALID_SCORE_FIELDS},
+        "scores": {
+            name: getattr(result.scores, name) for name in VALID_SCORE_FIELDS
+        },
         "critical_errors": [
             {
                 "claim": item.claim,
@@ -929,7 +992,9 @@ def _pairwise_from_payload(payload):
     result = payload["result"]
     if not isinstance(result, Mapping):
         raise JudgmentParseError("stored pairwise result has no result")
-    winner, reason, difference, confidence = parse_pairwise_result(json.dumps(result))
+    winner, reason, difference, confidence = parse_pairwise_result(
+        json.dumps(result)
+    )
     return PairwiseResult(
         winner,
         reason,
