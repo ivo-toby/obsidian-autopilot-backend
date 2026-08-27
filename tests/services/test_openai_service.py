@@ -238,7 +238,7 @@ def test_generate_weekly_summary_error(openai_service, mock_openai_client):
     assert summary is None
 
 
-def test_generate_meeting_notes_success(openai_service, mock_openai_client, sample_chat_response):
+def test_generate_meeting_notes_success(openai_service, mock_openai_client, sample_chat_response, tmp_path):
     """Test successful meeting notes generation."""
     # Setup
     function_call = FunctionCall(
@@ -260,9 +260,14 @@ def test_generate_meeting_notes_success(openai_service, mock_openai_client, samp
     mock_openai_client.chat.completions.create.return_value = sample_chat_response
 
     notes = "Test meeting notes content"
+    custom_prompt = tmp_path / "daily.md"
+    custom_prompt.write_text("CUSTOM DAILY PREFIX\n", encoding="utf-8")
 
     # Execute
-    result = openai_service.generate_meeting_notes(notes)
+    result = openai_service.generate_meeting_notes(
+        notes,
+        prompt_file=custom_prompt,
+    )
 
     # Assert
     assert result == {
@@ -281,6 +286,14 @@ def test_generate_meeting_notes_success(openai_service, mock_openai_client, samp
     call_args = mock_openai_client.chat.completions.create.call_args[1]
     assert call_args["model"] == "test-model"
     assert any(notes in msg["content"] for msg in call_args["messages"])
+    user_message = next(
+        message["content"]
+        for message in call_args["messages"]
+        if message["role"] == "user"
+    )
+    assert user_message == "CUSTOM DAILY PREFIX\n" + notes
+    assert call_args["functions"][0]["name"] == "create_meeting_notes"
+    assert call_args["function_call"] == {"name": "create_meeting_notes"}
 
 
 def test_generate_meeting_notes_error(openai_service, mock_openai_client):

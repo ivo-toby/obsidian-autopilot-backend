@@ -134,6 +134,41 @@ class TestLLMService:
 
             assert result == ["#tag1", "#tag2", "#tag3"]
 
+    def test_generate_meeting_notes_uses_external_prompt(self, tmp_path):
+        prompt = tmp_path / "daily.md"
+        prompt.write_text("CUSTOM DAILY PREFIX\n", encoding="utf-8")
+        config = {
+            "inference": {
+                "provider": "openai",
+                "model": "gpt-4o",
+                "openai": {"api_key": "test-key"},
+            }
+        }
+
+        with patch("services.llm_service.OpenAIProvider") as provider_class:
+            provider = Mock()
+            provider.get_provider_name.return_value = "openai"
+            provider.chat_completion_with_function.return_value = {
+                "content": None,
+                "function_call": {
+                    "name": "create_meeting_notes",
+                    "arguments": '{"meetings": []}',
+                },
+            }
+            provider_class.return_value = provider
+            service = LLMService(config)
+
+            assert service.generate_meeting_notes(
+                "LOG", prompt_file=prompt
+            ) == {"meetings": []}
+
+        messages, functions, function_call = (
+            provider.chat_completion_with_function.call_args.args[:3]
+        )
+        assert messages[1]["content"] == "CUSTOM DAILY PREFIX\nLOG"
+        assert functions[0]["name"] == "create_meeting_notes"
+        assert function_call == {"name": "create_meeting_notes"}
+
     def test_chat_completion_with_function(self):
         """Test chat_completion_with_function method."""
         config = {
