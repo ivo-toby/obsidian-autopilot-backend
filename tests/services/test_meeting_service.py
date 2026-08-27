@@ -5,12 +5,10 @@ This module contains tests for the meeting service functionality,
 including processing and saving meeting notes.
 """
 
-import os
-from datetime import datetime
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
-from pathlib import Path
 
 from services.meeting_service import MeetingService
 
@@ -115,12 +113,28 @@ def test_process_meeting_notes(meeting_service, sample_meeting_data):
     meeting_service.llm_service.generate_meeting_notes = Mock(return_value=mock_meeting_notes)
 
     # Execute
-    meeting_service.process_meeting_notes()
+    meeting_service.process_meeting_notes(prompt_file="/tmp/daily.md")
 
     # Assert
     meeting_service.notes_service.load_notes.assert_called_once()
     meeting_service.notes_service.extract_today_notes.assert_called_once()
-    meeting_service.llm_service.generate_meeting_notes.assert_called_once_with(mock_notes)
+    meeting_service.llm_service.generate_meeting_notes.assert_called_once_with(
+        mock_notes,
+        prompt_file="/tmp/daily.md",
+    )
+
+
+def test_process_meeting_notes_invalid_output_writes_nothing(
+    meeting_service, temp_dir, capsys
+):
+    meeting_service.notes_service.load_notes = Mock(return_value="LOG")
+    meeting_service.notes_service.extract_today_notes = Mock(return_value="LOG")
+    meeting_service.llm_service.generate_meeting_notes = Mock(return_value=None)
+
+    meeting_service.process_meeting_notes()
+
+    assert list(Path(temp_dir).glob("*.md")) == []
+    assert "No structured notes were generated" in capsys.readouterr().out
 
 
 def test_process_meeting_notes_dry_run(meeting_service, sample_meeting_data, temp_dir):

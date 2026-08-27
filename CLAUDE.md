@@ -93,11 +93,14 @@ isort .                  # Import sorting
 1. **From Clipboard** (`main.py notes --from-clipboard`):
    - Uses **simple text generation** (no function calling)
    - Reads transcript from clipboard
-   - Applies prompt template from `prompts/MEETING_PROMPT.md`
+   - Uses prompt template `prompts/MEETING_PROMPT.md` by default
+   - `--prompt-file` overrides the default prompt for this workflow
    - Returns markdown-formatted meeting notes directly
    - Saves to meeting notes directory with inferred topic name
 
 2. **From Daily Notes** (`main.py notes --meetingnotes`):
+   - Uses `prompts/DAILY_NOTES.md` by default to process daily logs into structured notes
+   - `--prompt-file` overrides the default prompt for this workflow
    - Uses **function calling** to extract structured meeting data
    - Parses daily notes to identify meeting entries
    - Returns: `{meetings: [{date, subject, participants, notes, decisions, action_items}]}`
@@ -153,7 +156,7 @@ python main.py notes --record-audio --app teams --stop-key s --audio-out ~/custo
 
 ### Processing clipboard meeting transcripts
 ```bash
-# Use default meetingnotes prompt
+# Use the default clipboard meeting prompt
 python main.py notes --from-clipboard
 
 # Use custom prompt file

@@ -50,15 +50,16 @@ def process_weekly_notes(cfg, cli_args):
 def process_meeting_notes(cfg, cli_args):
     """Process meeting notes: either from daily notes, or if --from-clipboard is set, from the system clipboard."""
     meeting_service = MeetingService(cfg)
+    prompt_file = getattr(cli_args, "prompt_file", None)
     if getattr(cli_args, "from_clipboard", False):
-        # Check if custom prompt file was specified
-        prompt_file = getattr(cli_args, "prompt_file", None)
         meeting_service.process_meeting_transcript(
             date_str=cli_args.date, dry_run=cli_args.dry_run, prompt_file=prompt_file
         )
     else:
         meeting_service.process_meeting_notes(
-            date_str=cli_args.date, dry_run=cli_args.dry_run
+            date_str=cli_args.date,
+            dry_run=cli_args.dry_run,
+            prompt_file=prompt_file,
         )
 
 

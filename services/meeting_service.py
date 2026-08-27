@@ -30,7 +30,10 @@ class MeetingService:
         self.llm_service = LLMService(config)
 
     def process_meeting_notes(
-        self, date_str: Optional[str] = None, dry_run: bool = False
+        self,
+        date_str: Optional[str] = None,
+        dry_run: bool = False,
+        prompt_file: Optional[str] = None,
     ) -> None:
         """
         Process daily notes to generate structured meeting notes.
@@ -38,6 +41,8 @@ class MeetingService:
         Args:
             date_str (str, optional): Date to process notes for. Defaults to None.
             dry_run (bool): If True, don't write files
+            prompt_file (str, optional): Path to a custom prompt file. Defaults to None
+                                        (uses prompts/DAILY_NOTES.md).
 
         Returns:
             None
@@ -49,7 +54,13 @@ class MeetingService:
             print("No notes found for today.")
             return
 
-        meeting_notes = self.llm_service.generate_meeting_notes(today_notes)
+        meeting_notes = self.llm_service.generate_meeting_notes(
+            today_notes,
+            prompt_file=prompt_file,
+        )
+        if meeting_notes is None:
+            print("No structured notes were generated.")
+            return
 
         if not dry_run:
             for meeting in meeting_notes.get("meetings", []):

@@ -32,7 +32,11 @@ def setup_argparser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", help="Command to execute")
 
     # Notes processing commands
-    notes_parser = subparsers.add_parser("notes", help="Process daily and weekly notes")
+    notes_parser = subparsers.add_parser(
+        "notes",
+        help="Process daily and weekly notes",
+        formatter_class=lambda prog: argparse.HelpFormatter(prog, width=100),
+    )
     notes_parser.add_argument(
         "--date",
         type=str,
@@ -65,7 +69,7 @@ def setup_argparser() -> argparse.ArgumentParser:
     notes_parser.add_argument(
         "--prompt-file",
         type=str,
-        help="Path to a custom prompt file for the meeting transcript feature"
+        help="Path to a custom prompt file for the selected notes workflow"
     )
 
     # Vector store commands

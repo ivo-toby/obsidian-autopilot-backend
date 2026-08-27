@@ -45,10 +45,12 @@ You can use the clipboard to process meeting transcripts directly:
    python main.py notes --from-clipboard
    ```
 
+`notes --from-clipboard` uses `prompts/MEETING_PROMPT.md` to summarize one full transcript.
+
 This will:
 
 - Take the transcript from your clipboard
-- Process it with the meeting notes prompt
+- Process it with `prompts/MEETING_PROMPT.md`
 - Intelligently infer a descriptive topic name from the content
 - Save a formatted summary to your configured meeting notes directory with filename `YYYY-MM-DD_inferred_topic.md`
 
@@ -194,6 +196,9 @@ python main.py notes --weekly
 
 # Process meeting notes only
 python main.py notes --meetingnotes
+
+`notes --meetingnotes` uses `prompts/DAILY_NOTES.md` to process daily logs into structured notes.
+`--prompt-file` overrides the default prompt for whichever workflow is selected.
 
 # Process learnings only
 python main.py notes --process-learnings
