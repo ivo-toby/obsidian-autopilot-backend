@@ -137,6 +137,41 @@ def test_process_meeting_notes_invalid_output_writes_nothing(
     assert "No structured notes were generated" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize(
+    "invalid_output",
+    [[], {"meetings": None}, {"meetings": {}}],
+)
+def test_process_meeting_notes_invalid_structure_writes_nothing(
+    meeting_service, temp_dir, invalid_output, capsys
+):
+    meeting_service.notes_service.load_notes = Mock(return_value="LOG")
+    meeting_service.notes_service.extract_today_notes = Mock(return_value="LOG")
+    meeting_service.llm_service.generate_meeting_notes = Mock(
+        return_value=invalid_output
+    )
+
+    meeting_service.process_meeting_notes()
+
+    assert list(Path(temp_dir).glob("*.md")) == []
+    assert "No structured notes were generated" in capsys.readouterr().out
+
+
+def test_process_meeting_notes_mixed_structure_writes_nothing(
+    meeting_service, sample_meeting_data, temp_dir
+):
+    meeting_service.notes_service.load_notes = Mock(return_value="LOG")
+    meeting_service.notes_service.extract_today_notes = Mock(return_value="LOG")
+    meeting_service.llm_service.generate_meeting_notes = Mock(
+        return_value={"meetings": [sample_meeting_data, "MALFORMED"]}
+    )
+
+    meeting_service.process_meeting_notes()
+
+    expected_filename = "2024-02-18_project_planning.md"
+    assert not (Path(temp_dir) / expected_filename).exists()
+    assert list(Path(temp_dir).glob("*.md")) == []
+
+
 def test_process_meeting_notes_dry_run(meeting_service, sample_meeting_data, temp_dir):
     """Test processing meeting notes in dry run mode."""
     # Setup

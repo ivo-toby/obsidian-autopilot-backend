@@ -197,12 +197,12 @@ python main.py notes --weekly
 # Process meeting notes only
 python main.py notes --meetingnotes
 
-`notes --meetingnotes` uses `prompts/DAILY_NOTES.md` to process daily logs into structured notes.
-`--prompt-file` overrides the default prompt for whichever workflow is selected.
-
 # Process learnings only
 python main.py notes --process-learnings
 ```
+
+`notes --meetingnotes` uses `prompts/DAILY_NOTES.md` to process daily logs into structured notes.
+`--prompt-file` overrides the default prompt for whichever workflow is selected.
 
 Options:
 

@@ -62,11 +62,22 @@ class MeetingService:
             print("No structured notes were generated.")
             return
 
+        if not isinstance(meeting_notes, dict):
+            print("No structured notes were generated.")
+            return
+
+        meetings = meeting_notes.get("meetings")
+        if not isinstance(meetings, list) or not all(
+            isinstance(meeting, dict) for meeting in meetings
+        ):
+            print("No structured notes were generated.")
+            return
+
         if not dry_run:
-            for meeting in meeting_notes.get("meetings", []):
+            for meeting in meetings:
                 self._save_meeting_notes(meeting)
         else:
-            for meeting in meeting_notes.get("meetings", []):
+            for meeting in meetings:
                 print(meeting)
 
     def process_meeting_transcript(
