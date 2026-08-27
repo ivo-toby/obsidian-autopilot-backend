@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 import benchmarks.meeting_summary.cli as cli_module
 import benchmarks.meeting_summary.judging as judging_module
 from benchmarks.meeting_summary.generation import (
@@ -61,7 +63,7 @@ def test_generation_artifacts_use_content_addressed_summary_and_hash(tmp_path):
 def test_stale_generation_fails_before_judge_rpc(tmp_path):
     config = make_judge_config(tmp_path, model_count=1)
     store = RunStore.create(config.output_dir, config.source)
-    generate_candidates(config, store, None, StubClient(["summary", "summary"]))
+    generate_candidates(config, store, None, StubClient(["summary"] * 4))
     config.cases[0].transcript.write_text("mutated transcript", encoding="utf-8")
     client = StubClient([json.dumps(VALID_JUDGMENT)])
 
@@ -90,7 +92,13 @@ def test_report_leaderboard_and_recommendations_are_split_prompt_safe(
         case="test-case",
         tags=("missed_blocker",),
     )
-    variant_cache = _generation(store, "local-a", 1, prompt="variant", case="dev-case")
+    variant_cache = _generation(
+        store,
+        "local-a",
+        1,
+        prompt="variant",
+        case="dev-case",
+    )
     _judgment(
         store,
         "local-a",
@@ -114,7 +122,27 @@ def test_report_leaderboard_and_recommendations_are_split_prompt_safe(
 def test_filtered_all_report_scope_survives_config_mutation(tmp_path, monkeypatch):
     from .test_cli import _config
 
-    config = _config(tmp_path, models=("candidate-a", "candidate-b", "luna-control"))
+    config = _config(
+        tmp_path,
+        models=("candidate-a", "candidate-b", "luna-control"),
+    )
+    (tmp_path / "validation.md").write_text("validation", encoding="utf-8")
+    (tmp_path / "test.md").write_text("test", encoding="utf-8")
+    config.write_text(
+        config.read_text(encoding="utf-8").replace(
+            "models:\n",
+            "  - id: validation\n"
+            "    transcript: validation.md\n"
+            "    golden: golden.md\n"
+            "    split: validation\n"
+            "  - id: test\n"
+            "    transcript: test.md\n"
+            "    golden: golden.md\n"
+            "    split: test\n"
+            "models:\n",
+        ),
+        encoding="utf-8",
+    )
     monkeypatch.setenv("PI_BENCHMARK_EXECUTABLE", str(FAKE_PI))
     monkeypatch.setenv("FAKE_PI_MODE", "valid_judgment")
     assert (
@@ -161,6 +189,12 @@ def test_filtered_all_report_scope_survives_config_mutation(tmp_path, monkeypatc
     assert {
         (row["model_id"], row["prompt_id"], row["split"]) for row in report["rows"]
     } == {("candidate-a", "current", "development")}
+    assert report["split_coverage"] == {
+        "configured_splits": ["development"],
+        "completed_splits": ["development"],
+        "missing_splits": [],
+        "development_only": True,
+    }
 
 
 def test_all_propagates_nonzero_judge_status(tmp_path, monkeypatch):
@@ -169,7 +203,11 @@ def test_all_propagates_nonzero_judge_status(tmp_path, monkeypatch):
     config = _config(tmp_path, models=("candidate-a",))
     store = cli_module.RunStore.create(tmp_path / "runs", config)
     monkeypatch.setattr(cli_module, "_open_or_create_store", lambda *args: store)
-    monkeypatch.setattr(cli_module, "generate_candidates", lambda *args, **kwargs: ())
+    monkeypatch.setattr(
+        cli_module,
+        "generate_candidates",
+        lambda *args, **kwargs: (),
+    )
     monkeypatch.setattr(cli_module, "_judge_store", lambda *args, **kwargs: 1)
     monkeypatch.setattr(
         cli_module,
@@ -180,6 +218,33 @@ def test_all_propagates_nonzero_judge_status(tmp_path, monkeypatch):
     monkeypatch.setattr(cli_module, "_has_complete_judgment", lambda *_: True)
 
     assert cli_module.main(["all", "--config", str(config)]) != 0
+
+
+@pytest.mark.parametrize("transcript_hash", ["stale", "missing"])
+def test_pairwise_rejects_stale_or_missing_item_b_transcript(tmp_path, transcript_hash):
+    config = make_judge_config(tmp_path, model_count=1)
+    store = RunStore.create(config.output_dir, config.source)
+    generation = generate_candidates(config, store, None, StubClient(["summary"] * 4))
+    judge_generations(
+        config,
+        store,
+        StubClient([json.dumps(VALID_JUDGMENT)] * len(generation)),
+    )
+    items_b = [item for item in generation if item.model_id == "luna-control"]
+    for item_b in items_b:
+        payload = store.read_json(item_b.artifact_path)
+        payload["transcript_sha256"] = (
+            "stale-transcript-hash" if transcript_hash == "stale" else "0" * 64
+        )
+        store.write_json(item_b.artifact_path.relative_to(store.run_dir), payload)
+
+    client = StubClient([])
+    assert judging_module.judge_pairwise_top_models(config, store, client) == ()
+    assert client.requests == []
+    pairwise = list((store.run_dir / "pairwise").rglob("*.json"))
+    assert pairwise and all(
+        store.read_json(path)["status"] == "failed" for path in pairwise
+    )
 
 
 def test_judge_prompts_mark_embedded_data_untrusted():

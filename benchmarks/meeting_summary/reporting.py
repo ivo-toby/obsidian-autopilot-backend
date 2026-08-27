@@ -715,19 +715,29 @@ def _recommendations(valid_jobs):
 
 def _split_coverage(config, rows, manifest=None):
     snapshot = _snapshot(manifest)
-    configured = (
-        {item.get("split", "") for item in snapshot.get("cases", [])}
-        if snapshot is not None
-        else (
+    if snapshot is not None:
+        cases = snapshot.get("cases", [])
+        scope = manifest.get("scope", {}) if isinstance(manifest, Mapping) else {}
+        case_ids = set(scope.get("case_ids", [])) if isinstance(scope, Mapping) else set()
+        splits = set(scope.get("splits", [])) if isinstance(scope, Mapping) else set()
+        configured = {
+            str(item.get("split", ""))
+            for item in cases
+            if (not case_ids or item.get("id") in case_ids)
+            and (not splits or item.get("split") in splits)
+        }
+    else:
+        configured = (
             {case.split for case in config.cases}
             if config is not None
             else {row.split for row in rows}
         )
-    )
     completed = {row.split for row in rows if row.completed_runs}
-    required_splits = {"validation", "test"}
+    required_splits = {"validation", "test"}.intersection(configured)
     missing = sorted(required_splits - completed)
-    development_only = not required_splits.issubset(completed)
+    development_only = configured == {"development"} or not required_splits.issubset(
+        completed
+    )
     return {
         "configured_splits": sorted(configured),
         "completed_splits": sorted(completed),

@@ -454,6 +454,13 @@ def judge_pairwise_top_models(
             case = _case(config, item_a.case_id)
             try:
                 transcript, golden = _load_judge_inputs(store, item_a, case)
+                transcript_b, _golden_b = _load_judge_inputs(
+                    store, item_b, case
+                )
+                if sha256_text(transcript_b) != sha256_text(transcript):
+                    raise ValueError(
+                        "pairwise item B transcript identity differs from item A"
+                    )
                 text_a = _read_verified_summary(store, item_a)
                 text_b = _read_verified_summary(store, item_b)
             except (OSError, UnicodeError, ValueError) as error:
