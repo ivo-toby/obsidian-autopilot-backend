@@ -127,6 +127,10 @@ Changed prompt or transcript content invalidates only the affected jobs. `--mode
 to stop the current generation or judgment phase at its first failure. A nonzero exit code
 means at least one requested job failed; completed artifacts and reports remain available.
 
+The CLI prints phase and job progress immediately, including cached jobs when using
+`--resume`. Calls remain sequential, and an active job may stay silent until the configured
+request timeout expires.
+
 Reports expose per-repetition quality, consistency, latency, tokens, baseline delta,
 pairwise outcomes, and prompt failure categories. Inspect critical factual failures and
 their transcript evidence separately from the aggregate score.

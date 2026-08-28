@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Mapping, Optional, Set, Tuple
+from typing import Callable, Dict, Mapping, Optional, Set, Tuple
 
 from .pi_rpc import PiRequest, PiResponse, PiRpcClient
 from .storage import RunStore, canonical_json_hash, sha256_text
@@ -142,6 +142,7 @@ def generate_candidates(
     filters: Optional[object],
     client: PiRpcClient,
     fail_fast: bool = False,
+    progress: Optional[Callable[[str], None]] = None,
 ) -> Tuple[GenerationArtifact, ...]:
     selected = _normalize_filters(filters)
     _validate_filters(config, selected)
@@ -152,8 +153,12 @@ def generate_candidates(
         cases = tuple(case for case in cases if case.split in selected.splits)
     models = _selected(config.models, selected.model_ids)
     _record_inputs(store, prompts, cases)
+    total = (
+        len(models) * len(prompts) * len(cases) * config.generation.repetitions
+    )
 
     artifacts = []
+    index = 0
     for model in models:
         for prompt_spec in prompts:
             prompt = prompt_spec.path.read_text(encoding="utf-8")
@@ -162,6 +167,7 @@ def generate_candidates(
                 transcript = case.transcript.read_text(encoding="utf-8")
                 transcript_hash = sha256_text(transcript)
                 for repetition in range(1, config.generation.repetitions + 1):
+                    index += 1
                     job = _make_job(
                         model,
                         prompt_spec,
@@ -182,8 +188,24 @@ def generate_candidates(
                         )
                         if _artifact_matches_job(cached, job, store):
                             artifacts.append(cached)
+                            _emit_progress(
+                                progress,
+                                _job_progress(
+                                    "generation",
+                                    index,
+                                    total,
+                                    "cached",
+                                    job,
+                                ),
+                            )
                             continue
                     try:
+                        _emit_progress(
+                            progress,
+                            _job_progress(
+                                "generation", index, total, "start", job
+                            ),
+                        )
                         response = client.run(
                             PiRequest(
                                 provider=job.provider,
@@ -212,6 +234,17 @@ def generate_candidates(
                                 artifact.to_payload(), artifact_path
                             )
                         )
+                        _emit_progress(
+                            progress,
+                            _job_progress(
+                                "generation",
+                                index,
+                                total,
+                                "failed",
+                                job,
+                                artifact.error,
+                            ),
+                        )
                         if fail_fast:
                             raise
                         continue
@@ -223,7 +256,60 @@ def generate_candidates(
                             artifact.to_payload(), artifact_path
                         )
                     )
+                    _emit_progress(
+                        progress,
+                        _job_progress(
+                            "generation",
+                            index,
+                            total,
+                            "complete",
+                            job,
+                            artifact.elapsed_seconds,
+                        ),
+                    )
     return tuple(artifacts)
+
+
+def _emit_progress(
+    progress: Optional[Callable[[str], None]], message: str
+) -> None:
+    if progress is not None:
+        progress(message)
+
+
+def _job_identity(job: GenerationJob) -> str:
+    return "model=%s prompt=%s case=%s repetition=%d" % (
+        job.model_id,
+        job.prompt_id,
+        job.case_id,
+        job.repetition,
+    )
+
+
+def _job_progress(
+    operation: str,
+    index: int,
+    total: int,
+    status: str,
+    job: GenerationJob,
+    detail: object = "",
+) -> str:
+    suffix = _job_identity(job)
+    if status == "complete":
+        suffix = "elapsed=%.2fs %s" % (float(str(detail)), suffix)
+    elif status == "failed":
+        suffix = "error=%s %s" % (_single_line(detail), suffix)
+    return "[%s %d/%d] %s %s" % (
+        operation,
+        index,
+        total,
+        status,
+        suffix,
+    )
+
+
+def _single_line(value: object) -> str:
+    return str(value).replace("\r", " ").replace("\n", " ")
 
 
 def _make_job(

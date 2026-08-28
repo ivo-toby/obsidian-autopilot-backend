@@ -25,6 +25,10 @@ class CliError(RuntimeError):
     """Raised for an invalid benchmark command or incomplete run."""
 
 
+def _print_progress(message: str) -> None:
+    print(message, flush=True)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m benchmarks.meeting_summary",
@@ -102,9 +106,15 @@ def _generate(args: argparse.Namespace) -> int:
     filters = _resume_filters(store, filters)
     client = _client()
     failed = False
+    _print_progress("[phase] generation")
     try:
         artifacts = generate_candidates(
-            config, store, filters, client, fail_fast=args.fail_fast
+            config,
+            store,
+            filters,
+            client,
+            fail_fast=args.fail_fast,
+            progress=_print_progress,
         )
         failed = any(artifact.status != "complete" for artifact in artifacts)
     except Exception as error:
@@ -123,8 +133,10 @@ def _judge(args: argparse.Namespace) -> int:
 
 def _report(args: argparse.Namespace) -> int:
     store = _open_store(args.run_dir)
+    _print_progress("[phase] reporting")
     report = build_report(store)
     write_report(store, report)
+    _print_progress("[reporting] complete path=%s" % store.run_dir)
     if not _has_complete_judgment(store):
         raise CliError("report requires at least one complete judgment")
     print("Reports written: %s" % store.run_dir)
@@ -143,9 +155,15 @@ def _all(args: argparse.Namespace) -> int:
     failed = False
     generation_aborted = False
 
+    _print_progress("[phase] generation")
     try:
         artifacts = generate_candidates(
-            config, store, filters, client, fail_fast=args.fail_fast
+            config,
+            store,
+            filters,
+            client,
+            fail_fast=args.fail_fast,
+            progress=_print_progress,
         )
         failed = any(artifact.status != "complete" for artifact in artifacts)
     except Exception as error:
@@ -161,9 +179,11 @@ def _all(args: argparse.Namespace) -> int:
             failed = True
             print("judging stopped: %s" % error, file=sys.stderr)
 
+    _print_progress("[phase] reporting")
     try:
         report = build_report(store)
         write_report(store, report)
+        _print_progress("[reporting] complete path=%s" % store.run_dir)
         failed = (
             failed
             or _has_requested_failures(config, store, args)
@@ -186,15 +206,22 @@ def _judge_store(
     _validate_filters(config, filters)
     client = _client()
     failed = False
+    _print_progress("[phase] absolute judging")
     try:
         judge_generations(
-            config, store, client, fail_fast=args.fail_fast, filters=filters
+            config,
+            store,
+            client,
+            fail_fast=args.fail_fast,
+            filters=filters,
+            progress=_print_progress,
         )
     except Exception as error:
         failed = True
         if args.fail_fast:
             print("absolute judging stopped: %s" % error, file=sys.stderr)
     if not failed or not args.fail_fast:
+        _print_progress("[phase] pairwise judging")
         try:
             judge_pairwise_top_models(
                 config,
@@ -202,6 +229,7 @@ def _judge_store(
                 client,
                 fail_fast=args.fail_fast,
                 filters=filters,
+                progress=_print_progress,
             )
         except Exception as error:
             failed = True

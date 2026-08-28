@@ -256,6 +256,153 @@ def test_invalid_json_gets_one_retry_and_failure_is_cached(tmp_path: Path):
     assert artifacts
 
 
+def test_absolute_progress_reports_selected_jobs_and_totals(tmp_path: Path):
+    config = make_config(tmp_path, model_count=1)
+    store = RunStore.create(config.output_dir, config.source)
+    filters = GenerationFilters(model_ids={"model-0"})
+    generation = generate_candidates(
+        config, store, filters, StubClient(["summary"] * 2)
+    )
+    messages = []
+
+    results = judge_generations(
+        config,
+        store,
+        StubClient([json.dumps(VALID_JUDGMENT)] * len(generation)),
+        filters=filters,
+        progress=messages.append,
+    )
+
+    assert len(results) == 2
+    assert messages[0].startswith("[absolute 1/2] start model=model-0")
+    assert messages[1].startswith("[absolute 1/2] complete elapsed=")
+    assert messages[2].startswith("[absolute 2/2] start model=model-0")
+    assert messages[3].startswith("[absolute 2/2] complete elapsed=")
+    assert "authoritative transcript" not in "\n".join(messages)
+
+
+def test_absolute_progress_reports_cached_jobs_without_start(tmp_path: Path):
+    config = make_config(tmp_path, model_count=1)
+    store = RunStore.create(config.output_dir, config.source)
+    filters = GenerationFilters(model_ids={"model-0"})
+    generation = generate_candidates(
+        config, store, filters, StubClient(["summary"] * 2)
+    )
+    judge_generations(
+        config,
+        store,
+        StubClient([json.dumps(VALID_JUDGMENT)] * len(generation)),
+        filters=filters,
+    )
+    messages = []
+    client = StubClient([])
+
+    results = judge_generations(
+        config,
+        store,
+        client,
+        filters=filters,
+        progress=messages.append,
+    )
+
+    assert len(results) == 2
+    assert client.requests == []
+    assert messages == [
+        "[absolute 1/2] cached model=model-0 prompt=current "
+        "case=case repetition=1",
+        "[absolute 2/2] cached model=model-0 prompt=current "
+        "case=case repetition=2",
+    ]
+    assert all(" start " not in message for message in messages)
+
+
+def test_absolute_progress_reports_parse_failures(tmp_path: Path):
+    config = make_config(tmp_path, model_count=1)
+    store = RunStore.create(config.output_dir, config.source)
+    filters = GenerationFilters(model_ids={"model-0"})
+    generation = generate_candidates(
+        config, store, filters, StubClient(["summary"] * 2)
+    )
+    messages = []
+
+    assert (
+        judge_generations(
+            config,
+            store,
+            StubClient(["not json"] * (2 * len(generation))),
+            filters=filters,
+            progress=messages.append,
+        )
+        == ()
+    )
+
+    assert len([item for item in messages if " failed " in item]) == 2
+    assert messages[0].startswith("[absolute 1/2] start model=model-0")
+    assert "[absolute 1/2] failed error=" in messages[1]
+    assert "elapsed=" in messages[1]
+    assert messages[2].startswith("[absolute 2/2] start model=model-0")
+    assert "[absolute 2/2] failed error=" in messages[3]
+
+
+def test_pairwise_progress_reports_matched_jobs_and_totals(tmp_path: Path):
+    config, store, pairwise_response = _pairwise_fixture(tmp_path)
+    messages = []
+
+    results = judge_pairwise_top_models(
+        config,
+        store,
+        StubClient([pairwise_response] * 4),
+        progress=messages.append,
+    )
+
+    assert len(results) == 4
+    assert messages[0].startswith("[pairwise 1/4] start models=")
+    assert messages[1].startswith("[pairwise 1/4] complete elapsed=")
+    assert messages[-2].startswith("[pairwise 4/4] start models=")
+    assert messages[-1].startswith("[pairwise 4/4] complete elapsed=")
+    assert "authoritative transcript" not in "\n".join(messages)
+
+
+def test_pairwise_progress_reports_cached_jobs_without_start(tmp_path: Path):
+    config, store, pairwise_response = _pairwise_fixture(tmp_path)
+    judge_pairwise_top_models(
+        config, store, StubClient([pairwise_response] * 4)
+    )
+    messages = []
+    client = StubClient([])
+
+    results = judge_pairwise_top_models(
+        config, store, client, progress=messages.append
+    )
+
+    assert len(results) == 4
+    assert client.requests == []
+    assert any("[pairwise 4/4] cached" in item for item in messages)
+    assert all(" start " not in message for message in messages)
+
+
+def test_pairwise_progress_reports_parse_failures(tmp_path: Path):
+    config, store, pairwise_response = _pairwise_fixture(tmp_path)
+    del pairwise_response
+    messages = []
+
+    assert (
+        judge_pairwise_top_models(
+            config,
+            store,
+            StubClient(["not json"] * 8),
+            progress=messages.append,
+        )
+        == ()
+    )
+
+    assert len([item for item in messages if " failed " in item]) == 4
+    assert messages[0].startswith("[pairwise 1/4] start models=")
+    assert "[pairwise 1/4] failed error=" in messages[1]
+    assert "elapsed=" in messages[1]
+    assert messages[-1].startswith("[pairwise 4/4] failed error=")
+
+
 def test_pairwise_placement_is_stable_and_balanced():
     placements = [
         choose_pairwise_order("a", "b", "case", "prompt", repetition)

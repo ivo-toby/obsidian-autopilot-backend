@@ -69,6 +69,18 @@ def test_validate_does_not_execute_pi(tmp_path, monkeypatch, capsys):
     assert not list((tmp_path / "runs").glob("*"))
 
 
+def test_print_progress_flushes(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "builtins.print",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+
+    cli_module._print_progress("progress message")
+
+    assert calls == [(("progress message",), {"flush": True})]
+
+
 def test_generate_prints_run_directory_and_preserves_failures(
     tmp_path, monkeypatch, capsys
 ):
@@ -193,6 +205,20 @@ def test_all_runs_generation_absolute_pairwise_and_report_in_order(
         (run_dir / name).exists()
         for name in ("report.md", "report.json", "report.csv")
     )
+    assert result.stdout.index("[phase] generation") < result.stdout.index(
+        "[phase] absolute judging"
+    )
+    assert result.stdout.index(
+        "[phase] absolute judging"
+    ) < result.stdout.index("[phase] pairwise judging")
+    assert result.stdout.index(
+        "[phase] pairwise judging"
+    ) < result.stdout.index("[phase] reporting")
+    assert "[generation 1/" in result.stdout
+    assert "[absolute 1/" in result.stdout
+    assert "[pairwise 1/" in result.stdout
+    assert "private transcript" not in result.stdout
+    assert "[reporting] complete path=" in result.stdout
     assert "private transcript" not in "".join(
         path.read_text(encoding="utf-8")
         for path in run_dir.rglob("*")

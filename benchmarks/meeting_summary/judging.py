@@ -8,7 +8,7 @@ import time
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
-from typing import Dict, Iterable, List, Mapping, Optional, Tuple
+from typing import Callable, Dict, Iterable, List, Mapping, Optional, Tuple
 
 from .generation import GenerationArtifact
 from .pi_rpc import PiRequest
@@ -278,12 +278,14 @@ def judge_generations(
     client,
     fail_fast: bool = False,
     filters: Optional[object] = None,
+    progress: Optional[Callable[[str], None]] = None,
 ) -> Tuple[JudgeResult, ...]:
     """Judge all complete generation artifacts, continuing past failures."""
     template = _prompt_template("judge-v1.md")
     artifacts = _generation_artifacts(store, filters)
+    total = len(artifacts)
     results: List[JudgeResult] = []
-    for artifact in artifacts:
+    for index, artifact in enumerate(artifacts, 1):
         case = _case(config, artifact.case_id)
         try:
             transcript, golden = _load_judge_inputs(store, artifact, case)
@@ -295,9 +297,30 @@ def judge_generations(
             )
             candidate = _read_verified_summary(store, artifact)
         except (OSError, UnicodeError, ValueError) as error:
-            store.write_json(
-                _judgment_path(artifact),
-                _judgment_failure_payload(artifact, str(error)),
+            error_text = str(error)
+            payload = _judgment_failure_payload(artifact, error_text)
+            store.write_json(_judgment_path(artifact), payload)
+            _emit_progress(
+                progress,
+                _judgment_progress(
+                    "absolute",
+                    index,
+                    total,
+                    "start",
+                    artifact,
+                ),
+            )
+            _emit_progress(
+                progress,
+                _judgment_progress(
+                    "absolute",
+                    index,
+                    total,
+                    "failed",
+                    artifact,
+                    payload.get("elapsed_seconds", 0.0),
+                    error_text,
+                ),
             )
             if fail_fast:
                 raise
@@ -330,7 +353,17 @@ def judge_generations(
         if cached is not None:
             payload = store.read_json(cached)
             results.append(_result_from_payload(payload))
+            _emit_progress(
+                progress,
+                _judgment_progress(
+                    "absolute", index, total, "cached", artifact
+                ),
+            )
             continue
+        _emit_progress(
+            progress,
+            _judgment_progress("absolute", index, total, "start", artifact),
+        )
         payload = _run_absolute_judge(
             config,
             store,
@@ -344,9 +377,119 @@ def judge_generations(
         path = store.write_json(_judgment_path(artifact), payload)
         if payload["status"] == "complete":
             results.append(_result_from_payload(store.read_json(path)))
-        elif fail_fast:
-            raise RuntimeError(str(payload.get("error") or "judgment failed"))
+            _emit_progress(
+                progress,
+                _judgment_progress(
+                    "absolute",
+                    index,
+                    total,
+                    "complete",
+                    artifact,
+                    payload.get("elapsed_seconds", 0.0),
+                ),
+            )
+        else:
+            _emit_progress(
+                progress,
+                _judgment_progress(
+                    "absolute",
+                    index,
+                    total,
+                    "failed",
+                    artifact,
+                    payload.get("elapsed_seconds", 0.0),
+                    payload.get("error", "judgment failed"),
+                ),
+            )
+            if fail_fast:
+                raise RuntimeError(
+                    str(payload.get("error") or "judgment failed")
+                )
     return tuple(results)
+
+
+def _emit_progress(
+    progress: Optional[Callable[[str], None]], message: str
+) -> None:
+    if progress is not None:
+        progress(message)
+
+
+def _artifact_identity(artifact: GenerationArtifact) -> str:
+    return "model=%s prompt=%s case=%s repetition=%d" % (
+        artifact.model_id,
+        artifact.prompt_id,
+        artifact.case_id,
+        artifact.repetition,
+    )
+
+
+def _judgment_progress(
+    operation: str,
+    index: int,
+    total: int,
+    status: str,
+    artifact: GenerationArtifact,
+    elapsed: object = 0.0,
+    error: object = "",
+) -> str:
+    identity = _artifact_identity(artifact)
+    if status == "complete":
+        suffix = "elapsed=%.2fs %s" % (float(str(elapsed)), identity)
+    elif status == "failed":
+        suffix = "error=%s elapsed=%.2fs %s" % (
+            _single_line(error),
+            float(str(elapsed)),
+            identity,
+        )
+    else:
+        suffix = identity
+    return "[%s %d/%d] %s %s" % (
+        operation,
+        index,
+        total,
+        status,
+        suffix,
+    )
+
+
+def _pairwise_progress(
+    index: int,
+    total: int,
+    status: str,
+    model_a: str,
+    model_b: str,
+    artifact: GenerationArtifact,
+    elapsed: object = 0.0,
+    error: object = "",
+) -> str:
+    identity = "models=%s,%s prompt=%s case=%s repetition=%d" % (
+        model_a,
+        model_b,
+        artifact.prompt_id,
+        artifact.case_id,
+        artifact.repetition,
+    )
+    if status == "complete":
+        suffix = "elapsed=%.2fs %s" % (float(str(elapsed)), identity)
+    elif status == "failed":
+        suffix = "error=%s elapsed=%.2fs %s" % (
+            _single_line(error),
+            float(str(elapsed)),
+            identity,
+        )
+    else:
+        suffix = identity
+    return "[pairwise %d/%d] %s %s" % (
+        index,
+        total,
+        status,
+        suffix,
+    )
+
+
+def _single_line(value: object) -> str:
+    return str(value).replace("\r", " ").replace("\n", " ")
 
 
 def _run_absolute_judge(
@@ -451,6 +594,7 @@ def judge_pairwise_top_models(
     client,
     fail_fast: bool = False,
     filters: Optional[object] = None,
+    progress: Optional[Callable[[str], None]] = None,
 ) -> Tuple[PairwiseResult, ...]:
     (
         """Compare the selected local models and the leading configured """
@@ -495,7 +639,7 @@ def judge_pairwise_top_models(
         (item.model_id, item.prompt_id, item.case_id, item.repetition): item
         for item in generation
     }
-    results: List[PairwiseResult] = []
+    comparison_jobs = []
     for model_a, model_b in pairs:
         jobs = sorted(
             (item for item in generation if item.model_id == model_a),
@@ -505,83 +649,157 @@ def judge_pairwise_top_models(
             item_b = by_job.get(
                 (model_b, item_a.prompt_id, item_a.case_id, item_a.repetition)
             )
-            if item_b is None:
-                continue
-            case = _case(config, item_a.case_id)
-            try:
-                transcript, golden = _load_judge_inputs(store, item_a, case)
-                transcript_b, _golden_b = _load_judge_inputs(
-                    store, item_b, case
+            if item_b is not None:
+                comparison_jobs.append((model_a, model_b, item_a, item_b))
+
+    total = len(comparison_jobs)
+    results: List[PairwiseResult] = []
+    for index, (model_a, model_b, item_a, item_b) in enumerate(
+        comparison_jobs, 1
+    ):
+        case = _case(config, item_a.case_id)
+        try:
+            transcript, golden = _load_judge_inputs(store, item_a, case)
+            transcript_b, _golden_b = _load_judge_inputs(store, item_b, case)
+            if sha256_text(transcript_b) != sha256_text(transcript):
+                raise ValueError(
+                    "pairwise item B transcript identity differs from item A"
                 )
-                if sha256_text(transcript_b) != sha256_text(transcript):
-                    raise ValueError(
-                        "pairwise item B transcript identity differs from "
-                        "item A"
-                    )
-                text_a = _read_verified_summary(store, item_a)
-                text_b = _read_verified_summary(store, item_b)
-            except (OSError, UnicodeError, ValueError) as error:
-                store.write_json(
-                    _pairwise_path(item_a, item_b),
-                    _pairwise_failure_payload(item_a, item_b, str(error)),
-                )
-                if fail_fast:
-                    raise
-                continue
-            first, second = choose_pairwise_order(
+            text_a = _read_verified_summary(store, item_a)
+            text_b = _read_verified_summary(store, item_b)
+        except (OSError, UnicodeError, ValueError) as error:
+            error_text = str(error)
+            payload = _pairwise_failure_payload(item_a, item_b, error_text)
+            store.write_json(_pairwise_path(item_a, item_b), payload)
+            _emit_progress(
+                progress,
+                _pairwise_progress(
+                    index,
+                    total,
+                    "start",
+                    model_a,
+                    model_b,
+                    item_a,
+                ),
+            )
+            _emit_progress(
+                progress,
+                _pairwise_progress(
+                    index,
+                    total,
+                    "failed",
+                    model_a,
+                    model_b,
+                    item_a,
+                    payload.get("elapsed_seconds", 0.0),
+                    error_text,
+                ),
+            )
+            if fail_fast:
+                raise
+            continue
+        first, second = choose_pairwise_order(
+            model_a,
+            model_b,
+            item_a.case_id,
+            item_a.prompt_id,
+            item_a.repetition,
+        )
+        summary_a = text_a if first == model_a else text_b
+        summary_b = text_b if first == model_a else text_a
+        prompt = render_pairwise_prompt(
+            template, transcript, golden, summary_a, summary_b
+        )
+        cache_key = canonical_json_hash(
+            {
+                "schema_version": 1,
+                "operation": "pairwise",
+                "prompt_version": PAIRWISE_PROMPT_VERSION,
+                "models": sorted((model_a, model_b)),
+                "case_id": item_a.case_id,
+                "prompt_id": item_a.prompt_id,
+                "repetition": item_a.repetition,
+                "summary_a": item_a.cache_key,
+                "summary_b": item_b.cache_key,
+                "transcript_sha256": sha256_text(transcript),
+                "golden_sha256": sha256_text(golden),
+                "summary_a_sha256": sha256_text(text_a),
+                "summary_b_sha256": sha256_text(text_b),
+                "golden_snapshot_sha256": sha256_text(golden),
+                "judge_provider": config.judge.provider,
+                "judge_model": config.judge.model,
+                "judge_thinking": config.judge.thinking,
+                "judge_timeout_seconds": config.judge.timeout_seconds,
+                "prompt_sha256": sha256_text(prompt),
+            }
+        )
+        cached = store.find_completed("pairwise", cache_key)
+        if cached is not None:
+            results.append(_pairwise_from_payload(store.read_json(cached)))
+            _emit_progress(
+                progress,
+                _pairwise_progress(
+                    index,
+                    total,
+                    "cached",
+                    model_a,
+                    model_b,
+                    item_a,
+                ),
+            )
+            continue
+        _emit_progress(
+            progress,
+            _pairwise_progress(
+                index,
+                total,
+                "start",
                 model_a,
                 model_b,
-                item_a.case_id,
-                item_a.prompt_id,
-                item_a.repetition,
-            )
-            summary_a = text_a if first == model_a else text_b
-            summary_b = text_b if first == model_a else text_a
-            prompt = render_pairwise_prompt(
-                template, transcript, golden, summary_a, summary_b
-            )
-            cache_key = canonical_json_hash(
-                {
-                    "schema_version": 1,
-                    "operation": "pairwise",
-                    "prompt_version": PAIRWISE_PROMPT_VERSION,
-                    "models": sorted((model_a, model_b)),
-                    "case_id": item_a.case_id,
-                    "prompt_id": item_a.prompt_id,
-                    "repetition": item_a.repetition,
-                    "summary_a": item_a.cache_key,
-                    "summary_b": item_b.cache_key,
-                    "transcript_sha256": sha256_text(transcript),
-                    "golden_sha256": sha256_text(golden),
-                    "summary_a_sha256": sha256_text(text_a),
-                    "summary_b_sha256": sha256_text(text_b),
-                    "golden_snapshot_sha256": sha256_text(golden),
-                    "judge_provider": config.judge.provider,
-                    "judge_model": config.judge.model,
-                    "judge_thinking": config.judge.thinking,
-                    "judge_timeout_seconds": config.judge.timeout_seconds,
-                    "prompt_sha256": sha256_text(prompt),
-                }
-            )
-            cached = store.find_completed("pairwise", cache_key)
-            if cached is not None:
-                results.append(_pairwise_from_payload(store.read_json(cached)))
-                continue
-            payload, result = _run_pairwise(
-                config,
-                client,
                 item_a,
-                item_b,
-                first,
-                second,
-                prompt,
-                cache_key,
-                sha256_text(golden),
+            ),
+        )
+        payload, result = _run_pairwise(
+            config,
+            client,
+            item_a,
+            item_b,
+            first,
+            second,
+            prompt,
+            cache_key,
+            sha256_text(golden),
+        )
+        path = store.write_json(_pairwise_path(item_a, item_b), payload)
+        if result is not None:
+            results.append(_pairwise_from_payload(store.read_json(path)))
+            _emit_progress(
+                progress,
+                _pairwise_progress(
+                    index,
+                    total,
+                    "complete",
+                    model_a,
+                    model_b,
+                    item_a,
+                    payload.get("elapsed_seconds", 0.0),
+                ),
             )
-            path = store.write_json(_pairwise_path(item_a, item_b), payload)
-            if result is not None:
-                results.append(_pairwise_from_payload(store.read_json(path)))
-            elif fail_fast:
+        else:
+            _emit_progress(
+                progress,
+                _pairwise_progress(
+                    index,
+                    total,
+                    "failed",
+                    model_a,
+                    model_b,
+                    item_a,
+                    payload.get("elapsed_seconds", 0.0),
+                    payload.get("error", "pairwise judgment failed"),
+                ),
+            )
+            if fail_fast:
                 raise RuntimeError(
                     str(payload.get("error") or "pairwise judgment failed")
                 )

@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from pathlib import Path
 import pytest
 
@@ -174,6 +175,110 @@ def test_completed_jobs_are_skipped_on_resume(tmp_path: Path):
 
     assert [a.cache_key for a in second] == [a.cache_key for a in first]
     assert second_client.requests == []
+
+
+def test_generation_progress_reports_uncached_jobs_without_transcript(
+    tmp_path: Path,
+):
+    config = replace(
+        make_config(tmp_path, transcript_text="private transcript"),
+        generation=GenerationSpec(2, "off", 10),
+    )
+    store = RunStore.create(config.output_dir, config.source)
+    messages = []
+
+    artifacts = generate_candidates(
+        config,
+        store,
+        GenerationFilters(
+            model_ids={"candidate"},
+            prompt_ids={"current"},
+            case_ids={"sync"},
+        ),
+        StubPiRpcClient(),
+        progress=messages.append,
+    )
+
+    assert [artifact.status for artifact in artifacts] == [
+        "complete",
+        "complete",
+    ]
+    assert messages[0] == (
+        "[generation 1/2] start model=candidate prompt=current "
+        "case=sync repetition=1"
+    )
+    assert messages[1].startswith("[generation 1/2] complete elapsed=")
+    assert messages[2] == (
+        "[generation 2/2] start model=candidate prompt=current "
+        "case=sync repetition=2"
+    )
+    assert messages[3].startswith("[generation 2/2] complete elapsed=")
+    assert "private transcript" not in "\n".join(messages)
+
+
+def test_generation_progress_reports_cached_jobs_without_start(
+    tmp_path: Path,
+):
+    config = replace(
+        make_config(tmp_path), generation=GenerationSpec(2, "off", 10)
+    )
+    store = RunStore.create(config.output_dir, config.source)
+    filters = GenerationFilters(
+        model_ids={"candidate"},
+        prompt_ids={"current"},
+        case_ids={"sync"},
+    )
+    first = generate_candidates(config, store, filters, StubPiRpcClient())
+    messages = []
+
+    second = generate_candidates(
+        config, store, filters, StubPiRpcClient(), progress=messages.append
+    )
+
+    assert [artifact.cache_key for artifact in second] == [
+        artifact.cache_key for artifact in first
+    ]
+    assert messages == [
+        "[generation 1/2] cached model=candidate prompt=current "
+        "case=sync repetition=1",
+        "[generation 2/2] cached model=candidate prompt=current "
+        "case=sync repetition=2",
+    ]
+    assert all(" start " not in message for message in messages)
+
+
+def test_generation_progress_reports_failures_before_continuing(
+    tmp_path: Path,
+):
+    config = replace(
+        make_config(tmp_path), generation=GenerationSpec(2, "off", 10)
+    )
+    store = RunStore.create(config.output_dir, config.source)
+    messages = []
+
+    artifacts = generate_candidates(
+        config,
+        store,
+        GenerationFilters(
+            model_ids={"candidate"},
+            prompt_ids={"current"},
+            case_ids={"sync"},
+        ),
+        StubPiRpcClient(fail_models={"candidate-model"}),
+        progress=messages.append,
+    )
+
+    assert [artifact.status for artifact in artifacts] == ["failed", "failed"]
+    assert messages[0].startswith("[generation 1/2] start model=candidate")
+    assert messages[1] == (
+        "[generation 1/2] failed error=stub failure "
+        "model=candidate prompt=current case=sync repetition=1"
+    )
+    assert messages[2].startswith("[generation 2/2] start model=candidate")
+    assert messages[3] == (
+        "[generation 2/2] failed error=stub failure "
+        "model=candidate prompt=current case=sync repetition=2"
+    )
 
 
 def test_prompt_and_transcript_content_changes_invalidate_only_related_jobs(
