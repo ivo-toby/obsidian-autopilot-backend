@@ -76,6 +76,31 @@ def test_stale_generation_fails_before_judge_rpc(tmp_path):
     assert "regenerat" in store.read_json(judgments[0])["error"].lower()
 
 
+@pytest.mark.parametrize("snapshot_state", ["missing", "corrupt"])
+def test_prompt_snapshot_failure_is_persisted_before_judge_rpc(
+    tmp_path, snapshot_state
+):
+    config = make_judge_config(tmp_path, model_count=1)
+    store = RunStore.create(config.output_dir, config.source)
+    generation = generate_candidates(
+        config, store, None, StubClient(["summary"] * 4)
+    )
+    snapshot = next((store.run_dir / "inputs" / "prompts").glob("*.md"))
+    if snapshot_state == "missing":
+        snapshot.unlink()
+    else:
+        snapshot.write_text("corrupt prompt", encoding="utf-8")
+
+    client = StubClient([json.dumps(VALID_JUDGMENT)])
+    assert judge_generations(config, store, client) == ()
+    assert client.requests == []
+    judgments = list((store.run_dir / "judgments").rglob("*.json"))
+    assert len(judgments) == len(generation)
+    failures = [store.read_json(path) for path in judgments]
+    assert all(item["status"] == "failed" for item in failures)
+    assert all("prompt" in item["error"] for item in failures)
+
+
 def test_report_leaderboard_and_recommendations_are_split_prompt_safe(
     tmp_path,
 ):

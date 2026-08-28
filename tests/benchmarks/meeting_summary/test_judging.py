@@ -140,6 +140,10 @@ def test_fence_is_stripped_and_critical_errors_are_separate():
 
 def test_prompt_is_anonymous_and_authoritative(tmp_path: Path):
     config = make_config(tmp_path, model_count=1)
+    summary_prompt = (
+        "## Tags\n## Participants\n## Discussion Notes\n## References"
+    )
+    config.prompts[0].path.write_text(summary_prompt, encoding="utf-8")
     store = RunStore.create(config.output_dir, config.source)
     generation = generate_candidates(
         config, store, None, StubClient(["summary", "summary"])
@@ -153,8 +157,43 @@ def test_prompt_is_anonymous_and_authoritative(tmp_path: Path):
     assert "model-0" not in request.prompt
     assert "local" not in request.prompt
     assert "The transcript is authoritative" in request.prompt
-    assert "Decisions must be explicit outcomes" in request.prompt
-    assert "Omit empty, generic, or fluff sections" in request.prompt
+    assert (
+        "<SUMMARY_INSTRUCTIONS>\n%s\n</SUMMARY_INSTRUCTIONS>" % summary_prompt
+        in request.prompt
+    )
+    assert "Available sections are `## Context`" not in request.prompt
+
+
+def test_object_string_array_gets_actionable_retry(tmp_path: Path):
+    config = make_config(tmp_path, model_count=1)
+    config = BenchmarkConfig(
+        source=config.source,
+        output_dir=config.output_dir,
+        generation=GenerationSpec(1, "off", 10),
+        prompts=config.prompts,
+        cases=config.cases,
+        models=config.models,
+        judge=config.judge,
+    )
+    store = RunStore.create(config.output_dir, config.source)
+    generate_candidates(
+        config,
+        store,
+        GenerationFilters(model_ids={"model-0"}),
+        StubClient(["summary"]),
+    )
+    invalid = json.loads(json.dumps(VALID_JUDGMENT))
+    invalid["missed_items"] = [
+        {"claim": "missing", "transcript_evidence": "evidence"}
+    ]
+    client = StubClient([json.dumps(invalid), json.dumps(VALID_JUDGMENT)])
+
+    results = judge_generations(config, store, client)
+
+    assert results
+    retry = client.requests[1].prompt
+    assert "missed_items must be an array of strings" in retry
+    assert "plain JSON strings, never objects" in retry
 
 
 def test_invalid_json_gets_one_retry_and_failure_is_cached(tmp_path: Path):
