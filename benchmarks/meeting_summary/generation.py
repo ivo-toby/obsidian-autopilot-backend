@@ -242,7 +242,6 @@ def generate_candidates(
                                 total,
                                 "failed",
                                 job,
-                                artifact.error,
                             ),
                         )
                         if fail_fast:
@@ -273,8 +272,12 @@ def generate_candidates(
 def _emit_progress(
     progress: Optional[Callable[[str], None]], message: str
 ) -> None:
-    if progress is not None:
+    if progress is None:
+        return
+    try:
         progress(message)
+    except Exception:
+        return
 
 
 def _job_identity(job: GenerationJob) -> str:
@@ -298,7 +301,7 @@ def _job_progress(
     if status == "complete":
         suffix = "elapsed=%.2fs %s" % (float(str(detail)), suffix)
     elif status == "failed":
-        suffix = "error=%s %s" % (_single_line(detail), suffix)
+        suffix = "error=see-artifact %s" % suffix
     return "[%s %d/%d] %s %s" % (
         operation,
         index,
@@ -306,10 +309,6 @@ def _job_progress(
         status,
         suffix,
     )
-
-
-def _single_line(value: object) -> str:
-    return str(value).replace("\r", " ").replace("\n", " ")
 
 
 def _make_job(

@@ -319,7 +319,6 @@ def judge_generations(
                     "failed",
                     artifact,
                     payload.get("elapsed_seconds", 0.0),
-                    error_text,
                 ),
             )
             if fail_fast:
@@ -398,7 +397,6 @@ def judge_generations(
                     "failed",
                     artifact,
                     payload.get("elapsed_seconds", 0.0),
-                    payload.get("error", "judgment failed"),
                 ),
             )
             if fail_fast:
@@ -411,8 +409,12 @@ def judge_generations(
 def _emit_progress(
     progress: Optional[Callable[[str], None]], message: str
 ) -> None:
-    if progress is not None:
+    if progress is None:
+        return
+    try:
         progress(message)
+    except Exception:
+        return
 
 
 def _artifact_identity(artifact: GenerationArtifact) -> str:
@@ -431,14 +433,12 @@ def _judgment_progress(
     status: str,
     artifact: GenerationArtifact,
     elapsed: object = 0.0,
-    error: object = "",
 ) -> str:
     identity = _artifact_identity(artifact)
     if status == "complete":
         suffix = "elapsed=%.2fs %s" % (float(str(elapsed)), identity)
     elif status == "failed":
-        suffix = "error=%s elapsed=%.2fs %s" % (
-            _single_line(error),
+        suffix = "error=see-artifact elapsed=%.2fs %s" % (
             float(str(elapsed)),
             identity,
         )
@@ -461,7 +461,6 @@ def _pairwise_progress(
     model_b: str,
     artifact: GenerationArtifact,
     elapsed: object = 0.0,
-    error: object = "",
 ) -> str:
     identity = "models=%s,%s prompt=%s case=%s repetition=%d" % (
         model_a,
@@ -473,8 +472,7 @@ def _pairwise_progress(
     if status == "complete":
         suffix = "elapsed=%.2fs %s" % (float(str(elapsed)), identity)
     elif status == "failed":
-        suffix = "error=%s elapsed=%.2fs %s" % (
-            _single_line(error),
+        suffix = "error=see-artifact elapsed=%.2fs %s" % (
             float(str(elapsed)),
             identity,
         )
@@ -486,10 +484,6 @@ def _pairwise_progress(
         status,
         suffix,
     )
-
-
-def _single_line(value: object) -> str:
-    return str(value).replace("\r", " ").replace("\n", " ")
 
 
 def _run_absolute_judge(
@@ -692,7 +686,6 @@ def judge_pairwise_top_models(
                     model_b,
                     item_a,
                     payload.get("elapsed_seconds", 0.0),
-                    error_text,
                 ),
             )
             if fail_fast:
@@ -796,7 +789,6 @@ def judge_pairwise_top_models(
                     model_b,
                     item_a,
                     payload.get("elapsed_seconds", 0.0),
-                    payload.get("error", "pairwise judgment failed"),
                 ),
             )
             if fail_fast:

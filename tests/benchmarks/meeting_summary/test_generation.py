@@ -271,14 +271,110 @@ def test_generation_progress_reports_failures_before_continuing(
     assert [artifact.status for artifact in artifacts] == ["failed", "failed"]
     assert messages[0].startswith("[generation 1/2] start model=candidate")
     assert messages[1] == (
-        "[generation 1/2] failed error=stub failure "
+        "[generation 1/2] failed error=see-artifact "
         "model=candidate prompt=current case=sync repetition=1"
     )
     assert messages[2].startswith("[generation 2/2] start model=candidate")
     assert messages[3] == (
-        "[generation 2/2] failed error=stub failure "
+        "[generation 2/2] failed error=see-artifact "
         "model=candidate prompt=current case=sync repetition=2"
     )
+
+
+def test_generation_raising_progress_preserves_success_and_cache(
+    tmp_path: Path,
+):
+    config = replace(
+        make_config(tmp_path), generation=GenerationSpec(2, "off", 10)
+    )
+    store = RunStore.create(config.output_dir, config.source)
+    filters = GenerationFilters(
+        model_ids={"candidate"},
+        prompt_ids={"current"},
+        case_ids={"sync"},
+    )
+
+    def raising_progress(_message):
+        raise RuntimeError("progress callback failed")
+
+    first_client = StubPiRpcClient()
+    first = generate_candidates(
+        config, store, filters, first_client, progress=raising_progress
+    )
+    second_client = StubPiRpcClient()
+    second = generate_candidates(
+        config, store, filters, second_client, progress=raising_progress
+    )
+
+    assert len(first_client.requests) == 2
+    assert [artifact.status for artifact in first] == [
+        "complete",
+        "complete",
+    ]
+    assert [artifact.cache_key for artifact in second] == [
+        artifact.cache_key for artifact in first
+    ]
+    assert second_client.requests == []
+
+
+def test_generation_raising_progress_preserves_fail_fast(tmp_path: Path):
+    config = make_config(tmp_path)
+    store = RunStore.create(config.output_dir, config.source)
+
+    def raising_progress(_message):
+        raise RuntimeError("progress callback failed")
+
+    client = StubPiRpcClient(fail_models={"candidate-model"})
+    with pytest.raises(RuntimeError, match="stub failure"):
+        generate_candidates(
+            config,
+            store,
+            GenerationFilters(
+                model_ids={"candidate"},
+                prompt_ids={"current"},
+                case_ids={"sync"},
+            ),
+            client,
+            fail_fast=True,
+            progress=raising_progress,
+        )
+
+    assert len(client.requests) == 1
+    failed = list((store.run_dir / "generations").rglob("*.json"))
+    assert len(failed) == 1
+    assert store.read_json(failed[0])["error"] == "stub failure"
+
+
+def test_generation_failure_progress_uses_safe_error_indicator(
+    tmp_path: Path,
+):
+    config = replace(
+        make_config(tmp_path), generation=GenerationSpec(1, "off", 10)
+    )
+    store = RunStore.create(config.output_dir, config.source)
+    filters = GenerationFilters(
+        model_ids={"candidate"},
+        prompt_ids={"current"},
+        case_ids={"sync"},
+    )
+    messages = []
+
+    class MarkerFailureClient:
+        def run(self, request):
+            raise RuntimeError("private transcript\\ncandidate secret")
+
+    artifacts = generate_candidates(
+        config,
+        store,
+        filters,
+        MarkerFailureClient(),
+        progress=messages.append,
+    )
+
+    assert [artifact.status for artifact in artifacts] == ["failed"]
+    assert messages[1].startswith("[generation 1/1] failed error=see-artifact")
+    assert "private transcript" not in "\n".join(messages)
+    assert "candidate secret" not in "\n".join(messages)
 
 
 def test_prompt_and_transcript_content_changes_invalidate_only_related_jobs(

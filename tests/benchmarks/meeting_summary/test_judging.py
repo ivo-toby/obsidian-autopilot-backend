@@ -344,6 +344,109 @@ def test_absolute_progress_reports_parse_failures(tmp_path: Path):
     assert "[absolute 2/2] failed error=" in messages[3]
 
 
+def test_absolute_raising_progress_preserves_success_and_cache(tmp_path: Path):
+    config = make_config(tmp_path, model_count=1)
+    store = RunStore.create(config.output_dir, config.source)
+    filters = GenerationFilters(model_ids={"model-0"})
+
+    generate_candidates(config, store, filters, StubClient(["summary"] * 2))
+
+    def raising_progress(_message):
+        raise RuntimeError("progress callback failed")
+
+    first_client = StubClient([json.dumps(VALID_JUDGMENT)] * 2)
+    first = judge_generations(
+        config,
+        store,
+        first_client,
+        filters=filters,
+        progress=raising_progress,
+    )
+    second_client = StubClient([])
+    second = judge_generations(
+        config,
+        store,
+        second_client,
+        filters=filters,
+        progress=raising_progress,
+    )
+
+    assert len(first) == 2
+    assert len(first_client.requests) == 2
+    assert len(second) == 2
+    assert second_client.requests == []
+    judgments = list((store.run_dir / "judgments").rglob("*.json"))
+    assert len(judgments) == 2
+    assert all(
+        store.read_json(path)["status"] == "complete" for path in judgments
+    )
+
+
+def test_absolute_raising_progress_preserves_fail_fast(tmp_path: Path):
+    config = make_config(tmp_path, model_count=1)
+    store = RunStore.create(config.output_dir, config.source)
+    filters = GenerationFilters(model_ids={"model-0"})
+    generation = generate_candidates(
+        config, store, filters, StubClient(["summary"] * 2)
+    )
+
+    def raising_progress(_message):
+        raise RuntimeError("progress callback failed")
+
+    client = StubClient(["not json"] * (2 * len(generation)))
+    with pytest.raises(RuntimeError, match="invalid JSON"):
+        judge_generations(
+            config,
+            store,
+            client,
+            fail_fast=True,
+            filters=filters,
+            progress=raising_progress,
+        )
+
+    assert len(client.requests) == 2
+    judgments = list((store.run_dir / "judgments").rglob("*.json"))
+    assert len(judgments) == 1
+    assert store.read_json(judgments[0])["status"] == "failed"
+
+
+def test_absolute_failure_progress_uses_safe_error_indicator(
+    tmp_path: Path,
+):
+    config = make_config(tmp_path, model_count=1)
+    store = RunStore.create(config.output_dir, config.source)
+    filters = GenerationFilters(model_ids={"model-0"})
+    generation = generate_candidates(
+        config, store, filters, StubClient(["summary"] * 2)
+    )
+    invalid = json.loads(json.dumps(VALID_JUDGMENT))
+    invalid["failure_tags"] = ["candidate secret"]
+    response = json.dumps(invalid)
+    messages = []
+
+    assert (
+        judge_generations(
+            config,
+            store,
+            StubClient([response] * (2 * len(generation))),
+            filters=filters,
+            progress=messages.append,
+        )
+        == ()
+    )
+
+    assert len([item for item in messages if " failed " in item]) == 2
+    assert all(
+        "error=see-artifact" in item for item in messages if " failed " in item
+    )
+    assert "private transcript" not in "\n".join(messages)
+    assert "candidate secret" not in "\n".join(messages)
+    failure = store.read_json(
+        next((store.run_dir / "judgments").rglob("*.json"))
+    )
+    assert "candidate secret" in failure["error"]
+
+
 def test_pairwise_progress_reports_matched_jobs_and_totals(tmp_path: Path):
     config, store, pairwise_response = _pairwise_fixture(tmp_path)
     messages = []
@@ -401,6 +504,83 @@ def test_pairwise_progress_reports_parse_failures(tmp_path: Path):
     assert "[pairwise 1/4] failed error=" in messages[1]
     assert "elapsed=" in messages[1]
     assert messages[-1].startswith("[pairwise 4/4] failed error=")
+
+
+def test_pairwise_raising_progress_preserves_success_and_cache(tmp_path: Path):
+    config, store, pairwise_response = _pairwise_fixture(tmp_path)
+
+    def raising_progress(_message):
+        raise RuntimeError("progress callback failed")
+
+    first_client = StubClient([pairwise_response] * 4)
+    first = judge_pairwise_top_models(
+        config, store, first_client, progress=raising_progress
+    )
+    second_client = StubClient([])
+    second = judge_pairwise_top_models(
+        config, store, second_client, progress=raising_progress
+    )
+
+    assert len(first) == 4
+    assert len(first_client.requests) == 4
+    assert len(second) == 4
+    assert second_client.requests == []
+    pairwise = list((store.run_dir / "pairwise").rglob("*.json"))
+    assert len(pairwise) == 4
+    assert all(
+        store.read_json(path)["status"] == "complete" for path in pairwise
+    )
+
+
+def test_pairwise_raising_progress_preserves_fail_fast(tmp_path: Path):
+    config, store, pairwise_response = _pairwise_fixture(tmp_path)
+    del pairwise_response
+
+    def raising_progress(_message):
+        raise RuntimeError("progress callback failed")
+
+    client = StubClient(["not json"] * 8)
+    with pytest.raises(RuntimeError, match="invalid JSON"):
+        judge_pairwise_top_models(
+            config,
+            store,
+            client,
+            fail_fast=True,
+            progress=raising_progress,
+        )
+
+    assert len(client.requests) == 2
+    pairwise = list((store.run_dir / "pairwise").rglob("*.json"))
+    assert len(pairwise) == 1
+    assert store.read_json(pairwise[0])["status"] == "failed"
+
+
+def test_pairwise_failure_progress_uses_safe_error_indicator(tmp_path: Path):
+    config, store, _pairwise_response = _pairwise_fixture(tmp_path)
+    messages = []
+
+    class MarkerFailureClient:
+        def run(self, request):
+            raise RuntimeError("private transcript\\ncandidate secret")
+
+    assert (
+        judge_pairwise_top_models(
+            config,
+            store,
+            MarkerFailureClient(),
+            progress=messages.append,
+        )
+        == ()
+    )
+
+    failures = [item for item in messages if " failed " in item]
+    assert len(failures) == 4
+    assert all("error=see-artifact" in item for item in failures)
+    assert "private transcript" not in "\n".join(messages)
+    assert "candidate secret" not in "\n".join(messages)
+    pairwise = list((store.run_dir / "pairwise").rglob("*.json"))
+    assert pairwise
+    assert "candidate secret" in store.read_json(pairwise[0])["error"]
 
 
 def test_pairwise_placement_is_stable_and_balanced():
