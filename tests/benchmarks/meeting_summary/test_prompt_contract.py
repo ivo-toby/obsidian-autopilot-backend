@@ -27,24 +27,59 @@ PROMPT_VARIANTS = {
     ),
 }
 
-REQUIRED_HEADINGS = (
-    "## Tags",
-    "## Participants",
-    "## Context",
-    "## Key Outcomes",
-    "## Discussion Notes",
-    "## Decisions Made",
-    "## Action Items",
-    "## References",
+PRECISION_FIRST_AUDIT_BLOCK = (
+    "## Silent Evidence Audit\n"
+    "\n"
+    "Before drafting, silently build an evidence table from the transcript. "
+    "The table must not appear in the answer.\n"
+    "\n"
+    "- Derive Participants only from speaker labels, not from names mentioned "
+    "in conversation.\n"
+    "- Require direct transcript evidence for every decision and action.\n"
+    "- Attach an owner or timing only to the exact commitment it qualifies.\n"
+    "- Preserve proposals, uncertainty, disagreement, and unresolved status.\n"
+    "- Omit or explicitly qualify corrupted or ambiguous terminology.\n"
+    "- Keep each fact in its one most-specific section.\n"
+    "- Prefer omission over inference when evidence is insufficient.\n"
+    "\n"
+    "Audit every final claim against that table before returning the summary. "
+    "Output only the contracted summary; the evidence table and audit "
+    "must not appear."
 )
 
-FORBIDDEN_DAILY_BEHAVIOR = (
-    "journal entries",
-    "infer which entries",
-    "create_meeting_notes",
-    "function call",
-    "multiple meetings",
+BALANCED_COVERAGE_AUDIT_BLOCK = (
+    "## Silent Coverage and Evidence Audit\n"
+    "\n"
+    "Before drafting, silently build a coverage ledger from the transcript. "
+    "The ledger must not appear in the answer.\n"
+    "\n"
+    "Check the ledger for:\n"
+    "\n"
+    "- major technical topic clusters;\n"
+    "- concrete metrics and timing;\n"
+    "- confirmed decisions;\n"
+    "- explicit actions, owners, and timing;\n"
+    "- blockers and dependencies;\n"
+    "- unresolved alternatives or scope disagreements;\n"
+    "- optional and stretch work separated from core scope.\n"
+    "\n"
+    "Then apply these evidence gates:\n"
+    "\n"
+    "- Derive Participants only from speaker labels, not from names mentioned "
+    "in conversation.\n"
+    "- Require direct transcript evidence for every decision and action.\n"
+    "- Attach an owner or timing only to the exact commitment it qualifies.\n"
+    "- Preserve proposals, uncertainty, disagreement, and unresolved status.\n"
+    "- Omit or explicitly qualify corrupted or ambiguous terminology.\n"
+    "- Keep each fact in its one most-specific section.\n"
+    "- Prefer omission over inference when evidence is insufficient.\n"
+    "\n"
+    "Audit the final summary against the ledger before returning it. Output "
+    "only the contracted summary; the coverage ledger and audit must not "
+    "appear."
 )
+
+OUTPUT_CONTRACT_BOUNDARY = "\n\n## Output Contract\n"
 
 
 def test_meeting_prompt_has_approved_summary_sections():
@@ -88,21 +123,25 @@ def test_benchmark_targets_only_meeting_prompts():
     assert "DAILY_NOTES" not in BENCHMARK_CONFIG.read_text(encoding="utf-8")
 
 
-def test_prompt_variants_preserve_meeting_contract():
-    for prompt in PROMPT_VARIANTS.values():
-        content = prompt.read_text(encoding="utf-8")
-        lower_content = content.lower()
+def _expected_prompt_variant(audit_block):
+    production = MEETING_PROMPT.read_text(encoding="utf-8")
 
-        for heading in REQUIRED_HEADINGS:
-            assert heading in content
-        for forbidden in FORBIDDEN_DAILY_BEHAVIOR:
-            assert forbidden not in lower_content
+    assert production.count(OUTPUT_CONTRACT_BOUNDARY) == 1
+    prefix, boundary, suffix = production.partition(OUTPUT_CONTRACT_BOUNDARY)
+    assert boundary
+    return prefix + "\n\n" + audit_block + boundary + suffix
 
-        assert "silently" in lower_content
-        assert "speaker labels" in lower_content
-        assert "must not appear" in lower_content
 
-    precision = PROMPT_VARIANTS["precision-first"].read_text(encoding="utf-8")
-    balanced = PROMPT_VARIANTS["balanced-coverage"].read_text(encoding="utf-8")
-    assert "prefer omission over inference" in precision.lower()
-    assert "coverage ledger" in balanced.lower()
+def test_prompt_variants_match_production_plus_approved_audit():
+    expected_variants = {
+        "precision-first": _expected_prompt_variant(
+            PRECISION_FIRST_AUDIT_BLOCK
+        ),
+        "balanced-coverage": _expected_prompt_variant(
+            BALANCED_COVERAGE_AUDIT_BLOCK
+        ),
+    }
+
+    for prompt_id, expected in expected_variants.items():
+        actual = PROMPT_VARIANTS[prompt_id].read_text(encoding="utf-8")
+        assert actual == expected
