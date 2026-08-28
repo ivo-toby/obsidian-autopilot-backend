@@ -15,6 +15,10 @@ cases:
     transcript: ~/cf-notes/transcripts/2026-06-11-core-ai-agents-sync.md
     golden: ~/cf-notes/golden-summary.md
     split: development
+  - id: triage-agent-kickoff
+    transcript: ~/cf-notes/transcripts/2026-08-20-jethro-ivo-triage-agent-kickoff.md
+    golden: ~/cf-notes/golden-summary-triage-agent.md
+    split: validation
 
 models:
   - id: qwen35-9b
