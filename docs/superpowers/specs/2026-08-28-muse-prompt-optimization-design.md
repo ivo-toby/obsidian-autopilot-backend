@@ -1,10 +1,10 @@
-# Muse-Glimmer Prompt Optimization Design
+# Cross-Model Meeting Summary Prompt Optimization Design
 
 ## Goal
 
-Improve meeting-summary factual reliability for Muse-Glimmer without changing the production prompt automatically or tuning against validation results.
+Improve meeting-summary factual reliability for Muse-Glimmer while checking that the prompt generalizes to Qwen3.8 and measuring the cloud ceiling with Luna. Do not change the production prompt automatically or tune against validation results.
 
-Muse-Glimmer is the selected local model. With the current prompt it scored 71.0 on development and 66.0 on validation, with 10 and 6 critical factual errors respectively. It won 11 of 12 local pairwise comparisons but remained slower and less reliable than the Luna control.
+Muse-Glimmer remains the selected local deployment target. Qwen3.8 uses the configured `qwen38` benchmark model, `homelab/titan/ollama/qwen3.8:latest`. Luna uses the configured `luna-control` baseline, `openai-codex/gpt-5.6-luna`.
 
 ## Experiment shape
 
@@ -13,11 +13,11 @@ Create two prompt variants and evaluate them only on the existing development ca
 1. `precision-first`: favor supported claims over completeness.
 2. `balanced-coverage`: combine the same evidence gates with a private coverage ledger for major topics, metrics, decisions, actions, blockers, and unresolved scope.
 
-Run Muse-Glimmer three times per variant on development. Compare those six generations with the existing `current` development baseline; do not regenerate the baseline or Luna control.
+Run each variant three times on Muse-Glimmer, Qwen3.8, and Luna for development: 18 generations. Compare them with the existing `current` development baselines; do not regenerate the current prompt results.
 
-Promote one variant to validation only when it reduces development critical factual errors. If both variants improve, choose by aggregate score, completeness, consistency, and latency in that order after factual reliability. Run the selected variant three times on validation. It must also reduce validation critical factual errors relative to the existing baseline before it is eligible for manual promotion.
+Promote one variant to validation only when it reduces Muse-Glimmer development critical factual errors without increasing critical errors for Qwen3.8 or Luna. If both variants qualify, choose using the evaluation gates below. Run the selected variant three times on all three models for validation: nine generations. It must reduce Muse-Glimmer validation critical factual errors without increasing critical errors for Qwen3.8 or Luna before it is eligible for manual promotion.
 
-No prompt is promoted automatically. `prompts/MEETING_PROMPT.md` remains unchanged until Ivo explicitly approves a winning variant after validation.
+The complete experiment requires 27 generations. Muse-Glimmer is the primary optimization target, Qwen3.8 is the local-model generalization check, and Luna is the cloud baseline. No prompt is promoted automatically. `prompts/MEETING_PROMPT.md` remains unchanged until Ivo explicitly approves a winning variant after validation.
 
 ## Prompt variants
 
@@ -71,40 +71,53 @@ The existing `test_benchmark_still_targets_only_meeting_prompt` assertion curren
 
 Use these existing baselines:
 
-| Split | Mean score | Critical errors | Score stddev |
-| --- | ---: | ---: | ---: |
-| development | 71.0 | 10 | 1.63 |
-| validation | 66.0 | 6 | 1.63 |
+| Model | Split | Mean score | Critical errors | Score stddev |
+| --- | --- | ---: | ---: | ---: |
+| Muse-Glimmer | development | 71.0 | 10 | 1.63 |
+| Muse-Glimmer | validation | 66.0 | 6 | 1.63 |
+| Qwen3.8 | development | 56.33 | 19 | 0.94 |
+| Qwen3.8 | validation | 55.33 | 14 | 2.05 |
+| Luna | development | 73.0 | 7 | 1.63 |
+| Luna | validation | 76.33 | 3 | 2.87 |
 
-Selection order:
+Development eligibility requires both conditions:
 
-1. Fewer critical factual errors than the relevant baseline.
-2. Higher aggregate score.
-3. Better coverage of explicit decisions, actions, blockers, and metrics.
-4. Lower score variance across three repetitions.
-5. Lower latency.
+1. Fewer Muse-Glimmer critical factual errors than the development baseline of 10.
+2. No increase in Qwen3.8 or Luna critical factual errors from their development baselines of 19 and 7.
 
-A score increase cannot compensate for equal or worse critical factual errors. Review each hard failure and its transcript evidence before choosing a winner.
+When both variants are eligible, select in this order:
+
+1. Lowest combined critical factual errors across all three models.
+2. Highest Muse-Glimmer aggregate score.
+3. Better coverage of explicit decisions, actions, blockers, and metrics across all three models.
+4. Lower Muse-Glimmer score variance across three repetitions.
+5. Lower Muse-Glimmer latency.
+
+Validation uses the same guardrail: Muse-Glimmer must improve from 6 critical errors while Qwen3.8 and Luna must not regress from 14 and 3. A score increase cannot compensate for equal or worse Muse-Glimmer critical factual errors or a factual regression on either control model. Review each hard failure and its transcript evidence before choosing or promoting a winner. Pairwise model comparisons are secondary evidence; they do not override the factual-error gate.
 
 ## Commands
 
-Development experiment, six Muse-Glimmer generations:
+Development experiment, 18 generations:
 
 ```bash
 python -m benchmarks.meeting_summary all \
   --config benchmarks/meeting_summary/benchmark.yaml \
   --model muse-glimmer \
+  --model qwen38 \
+  --model luna-control \
   --prompt precision-first \
   --prompt balanced-coverage \
   --split development
 ```
 
-Validation experiment after choosing one development winner, three generations:
+Validation experiment after choosing one development winner, nine generations:
 
 ```bash
 python -m benchmarks.meeting_summary all \
   --config benchmarks/meeting_summary/benchmark.yaml \
   --model muse-glimmer \
+  --model qwen38 \
+  --model luna-control \
   --prompt <winning-prompt-id> \
   --split validation
 ```
