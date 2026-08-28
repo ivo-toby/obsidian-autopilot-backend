@@ -121,6 +121,7 @@ def validate_benchmark_config(config: BenchmarkConfig) -> None:
     _require_unique((model.id for model in config.models), "model")
 
     for prompt in config.prompts:
+        _require_path_safe_id(prompt.id, "prompt")
         _require_file(prompt.path, "prompt")
     for case in config.cases:
         _require_file(case.transcript, "transcript")
@@ -176,6 +177,11 @@ def _require_unique(ids: Iterable[str], name: str) -> None:
     values = tuple(ids)
     if len(values) != len(set(values)):
         raise ValueError(f"duplicate {name} id")
+
+
+def _require_path_safe_id(value: str, name: str) -> None:
+    if "/" in value or "\\" in value:
+        raise ValueError(f"{name} id must not contain path separators")
 
 
 def _require_file(path: Path, kind: str) -> None:

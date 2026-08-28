@@ -64,6 +64,22 @@ judge:
     return config_path
 
 
+@pytest.mark.parametrize("prompt_id", ["nested/current", r"nested\\current"])
+def test_prompt_id_path_separator_is_rejected_before_run_creation(
+    tmp_path: Path, prompt_id: str
+):
+    config_path = _write_config(
+        tmp_path,
+        prompts=(
+            "  - id: '%s'\n    path: %s" % (prompt_id, tmp_path / "prompt.md")
+        ),
+    )
+
+    with pytest.raises(ValueError, match="path separators"):
+        load_benchmark_config(config_path)
+    assert not (tmp_path / "results").exists()
+
+
 def test_load_config_expands_paths_and_preserves_colons(tmp_path: Path):
     prompt = tmp_path / "prompt.md"
     transcript = tmp_path / "transcript.md"

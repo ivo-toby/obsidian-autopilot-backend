@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import dataclass
 from hashlib import sha256
@@ -102,6 +103,7 @@ _JUDGE_KEYS = frozenset(
 _PAIRWISE_KEYS = frozenset(
     {"winner", "reason", "critical_difference", "confidence"}
 )
+_PLACEHOLDER_RE = re.compile(r"\{([^{}]+)\}")
 
 
 def parse_judge_result(raw: str) -> JudgeResult:
@@ -264,9 +266,10 @@ def render_pairwise_prompt(
 
 
 def _substitute(template: str, values: Mapping[str, str]) -> str:
-    for name, value in values.items():
-        template = template.replace("{" + name + "}", value)
-    return template
+    return _PLACEHOLDER_RE.sub(
+        lambda match: values.get(match.group(1), match.group(0)),
+        template,
+    )
 
 
 def judge_generations(

@@ -164,6 +164,35 @@ def test_prompt_is_anonymous_and_authoritative(tmp_path: Path):
     assert "Available sections are `## Context`" not in request.prompt
 
 
+def test_prompt_rendering_preserves_reserved_literals_in_each_block():
+    template = (
+        "<SUMMARY_INSTRUCTIONS>{summary_instructions}</SUMMARY_INSTRUCTIONS>\n"
+        "<TRANSCRIPT>{transcript}</TRANSCRIPT>\n"
+        "<GOLDEN_SUMMARY>{golden}</GOLDEN_SUMMARY>\n"
+        "<CANDIDATE_SUMMARY>{candidate}</CANDIDATE_SUMMARY>"
+    )
+    summary_instructions = "summary {transcript} {golden} {candidate}"
+    transcript = "transcript {summary_instructions} {golden} {candidate}"
+    golden = "golden {summary_instructions} {transcript} {candidate}"
+    candidate = "candidate {summary_instructions} {transcript} {golden}"
+
+    rendered = judging_module.render_judge_prompt(
+        template,
+        summary_instructions,
+        transcript,
+        golden,
+        candidate,
+    )
+
+    assert (
+        "<SUMMARY_INSTRUCTIONS>%s</SUMMARY_INSTRUCTIONS>"
+        % summary_instructions
+    ) in rendered
+    assert "<TRANSCRIPT>%s</TRANSCRIPT>" % transcript in rendered
+    assert "<GOLDEN_SUMMARY>%s</GOLDEN_SUMMARY>" % golden in rendered
+    assert "<CANDIDATE_SUMMARY>%s</CANDIDATE_SUMMARY>" % candidate in rendered
+
+
 def test_object_string_array_gets_actionable_retry(tmp_path: Path):
     config = make_config(tmp_path, model_count=1)
     config = BenchmarkConfig(
