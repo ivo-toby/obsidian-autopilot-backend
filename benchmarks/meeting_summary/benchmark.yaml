@@ -9,6 +9,10 @@ generation:
 prompts:
   - id: current
     path: ../../prompts/MEETING_PROMPT.md
+  - id: precision-first
+    path: ../../prompts/MEETING_PROMPT_PRECISION_FIRST.md
+  - id: balanced-coverage
+    path: ../../prompts/MEETING_PROMPT_BALANCED_COVERAGE.md
 
 cases:
   - id: core-ai-agents-sync
